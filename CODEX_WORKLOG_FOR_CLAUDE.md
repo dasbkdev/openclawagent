@@ -165,9 +165,13 @@ server, and configure SSL for domain `starlabagent.pp.ua`.
 - `https://starlabagent.pp.ua/health` returned OK with Basic Auth.
 - `https://starlabagent.pp.ua/setup` returned the setup wizard HTML with Basic
   Auth.
+- External HTTPS health check from the operator machine returned OK.
 - `company-control-plane-api.service` is active and enabled.
 - `company-control-plane-telegram-bot.service` is active and enabled.
 - `nginx` is active and enabled.
+- `certbot.timer` is present for automatic renewal.
+- A manual `certbot renew --dry-run` attempt hung and was stopped; the real
+  certificate is installed and valid.
 - Ports listening:
   - `22` SSH
   - `80` HTTP redirect/challenge
