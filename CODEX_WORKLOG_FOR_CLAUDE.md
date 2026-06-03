@@ -173,6 +173,49 @@ token. Bitrix credentials will be provided later.
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Root AI Device Installation Playbook
+
+### User Request
+
+Create a mega-detailed file in the root `agent` folder so an AI can understand
+how to install the product on every employee device, what each role means, what
+the project is about, and that Nikolay's computer is always on.
+
+### Implemented
+
+- Added root playbook:
+  - `C:\Users\dasmu\agent\AI_DEVICE_INSTALLATION_PLAYBOOK.md`
+- Covered:
+  - project summary;
+  - safety rules;
+  - secrets handling;
+  - folder layout;
+  - control-plane, OpenClaw, Metricon responsibilities;
+  - Nikolay/Maksat/PM roles;
+  - Nikolay's always-on 24/7 computer;
+  - Radmin VPN network model;
+  - setup wizard values;
+  - Windows/macOS/Linux install flow;
+  - role-specific install notes;
+  - Telegram commands;
+  - token usage analytics;
+  - Sonnet model policy;
+  - verification checklist;
+  - current known gaps;
+  - files to read first on a new device.
+- Kept secrets out of the playbook.
+
+### Verification
+
+- Confirmed file exists:
+  - `C:\Users\dasmu\agent\AI_DEVICE_INSTALLATION_PLAYBOOK.md`
+- Scanned playbook and worklog for the known Telegram token fragments; token was
+  not found.
+
+### Status
+
+Done. Ready for Claude review.
+
 ## 2026-06-02 - Windows Install And Local Git Preparation
 
 ### User Request
