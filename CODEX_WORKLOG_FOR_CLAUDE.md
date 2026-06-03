@@ -104,6 +104,36 @@ Continue development. Add the next step and record all work in a file under
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Metricon AI User Creation Attempt
+
+### User Request
+
+Use provided Metricon admin credentials to create an AI service user and obtain
+Metricon access credentials for the central server.
+
+### Result
+
+- Did not write the provided passwords to repo files or worklog.
+- Called Metricon auth endpoint:
+  - `POST http://85.239.49.208:8080/api/v1/auth/login`
+- Metricon returned:
+  - `400`
+  - `INVALID_CREDENTIALS`
+- Could not create the AI user because `POST /api/v1/users` requires a valid
+  admin Bearer token.
+
+### Next Required User Action
+
+Confirm the correct Metricon admin email/password for
+`http://85.239.49.208:8080`, or log in manually and create the AI user in
+Metricon UI. Once a valid admin login is available, Codex can create:
+
+- email: `openclawstarlab@gmail.com`
+- role: `ADMIN` for MVP read access
+
+Then Codex can obtain and store the AI user's Metricon token on the central
+server.
+
 ## 2026-06-03 - Linux Server Deployment On starlabagent.pp.ua
 
 ### User Request
