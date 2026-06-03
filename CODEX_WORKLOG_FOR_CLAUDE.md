@@ -104,6 +104,26 @@ Continue development. Add the next step and record all work in a file under
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Linux Server SSH Attempt With Invalid IP
+
+### User Request
+
+Try connecting to the Linux server over SSH as `root`.
+
+### Result
+
+- Did not store or commit the provided password.
+- Tried SSH in non-interactive/batch mode first.
+- SSH did not reach authentication.
+- Provided host `114.29.263.103` is not a valid IPv4 address because `263` is
+  outside the allowed `0-255` octet range.
+- OpenSSH returned a hostname resolution error before any password could be
+  tested.
+
+### Next Required User Action
+
+Provide the corrected server IP/hostname, then retry SSH.
+
 ## 2026-06-03 - Create Server Branch And Push Attempt
 
 ### User Request
