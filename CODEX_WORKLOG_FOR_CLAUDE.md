@@ -104,6 +104,70 @@ Continue development. Add the next step and record all work in a file under
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Linux Central Server Support
+
+### User Request
+
+Windows server setup is not working well, so switch the central server plan to
+Linux and prepare Linux installation support.
+
+### Implemented
+
+- Added Linux server scripts:
+  - `control-plane\scripts\linux\preflight-linux-server.sh`
+  - `control-plane\scripts\linux\install-linux.sh`
+  - `control-plane\scripts\linux\restart-linux.sh`
+  - `control-plane\scripts\linux\uninstall-linux.sh`
+- Added Linux install docs:
+  - `control-plane\docs\LINUX_INSTALL.md`
+- Updated root/server docs to make Linux the preferred central server target:
+  - `SERVER_PREP_RUNBOOK.md`
+  - `CENTRALIZED_SERVER_PLAN.md`
+  - `AI_DEVICE_INSTALLATION_PLAYBOOK.md`
+  - `README.md`
+- Updated control-plane docs:
+  - `control-plane\README.md`
+  - `control-plane\docs\ARCHITECTURE.md`
+  - `control-plane\docs\DEVICE_INSTALL_CHECKLIST.md`
+- Added `.gitattributes` so Linux shell scripts keep LF endings and executable
+  scripts are safe after clone.
+
+### Linux Runtime Layout
+
+- Application files:
+  - `/opt/company-control-plane`
+- Non-secret env:
+  - `/etc/company-control-plane/control-plane.env`
+- Runtime data and encrypted secrets:
+  - `/var/lib/company-control-plane`
+- systemd services:
+  - `company-control-plane-api.service`
+  - `company-control-plane-telegram-bot.service`
+
+### Notes
+
+- Node.js `22+` is required on Linux and must be installed system-wide for
+  systemd, not only through `nvm`.
+- Setup wizard should be accessed through SSH tunnel for the first pilot:
+  - `ssh -L 3099:127.0.0.1:3099 <user>@<server-ip>`
+- Production secrets still go through setup wizard, not git and not the Linux
+  env file.
+- Windows installer remains as fallback/testing path only.
+
+### Verification
+
+- `bash -n` passed for all Linux scripts.
+- `npm test` in `control-plane`: 29/29 passed.
+- Secret scan found only placeholders/test values, no real Telegram/Claude
+  secrets.
+
+### Open Risks
+
+- Need to test scripts on the actual Linux server.
+- Need to install/confirm Node.js `22+`, Git, and Tailscale on the server.
+- Need to confirm server distro and package manager.
+- Need to decide backup retention and whether to add a backup script.
+
 ## 2026-06-03 - Server SSH Connectivity Attempt
 
 ### User Request
@@ -259,8 +323,8 @@ needs a different private network plan.
 ### Decision
 
 - Use Tailscale as the primary VPN/tailnet for all new installs.
-- Keep Nikolay's always-on Windows office computer as the main 24/7
-  control-plane node.
+- Keep the central server controlled by Nikolay as the main 24/7 control-plane
+  node.
 - Connect Maksat and PM devices to the same Tailscale tailnet.
 - Record each device's role, Tailscale IPv4 address, and MagicDNS name if
   MagicDNS is enabled.

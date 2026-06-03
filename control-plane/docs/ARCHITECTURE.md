@@ -23,7 +23,8 @@ Telegram Bot / OpenClaw channel
 
 ## Centralized Server Model
 
-For the MVP, Nikolay's always-on office computer is the central server. It runs:
+For the MVP, a Linux server/VPS controlled by Nikolay is the central server. It
+runs:
 
 - the HTTP API;
 - the setup wizard;
@@ -66,7 +67,8 @@ Wizard-managed secrets:
 - Google OAuth client JSON.
 
 The current MVP masks stored secrets in the UI and API responses. For
-production, move the encryption key into DPAPI on Windows and Keychain on macOS.
+production, move the encryption key into a managed secret store or OS-backed
+key management strategy.
 
 ## Claude Model Policy
 
@@ -136,9 +138,45 @@ parses commands, calls domain services, and sends formatted summaries.
 If the bot starts before setup is complete, it waits until the Telegram token is
 saved instead of exiting.
 
+## Linux Runtime
+
+Linux is the preferred central server target.
+
+The Linux install scripts place application files under:
+
+```text
+/opt/company-control-plane
+```
+
+Non-secret environment config lives under:
+
+```text
+/etc/company-control-plane/control-plane.env
+```
+
+Mutable runtime state and encrypted setup secrets live under:
+
+```text
+/var/lib/company-control-plane
+```
+
+Autostart is handled by systemd:
+
+```text
+company-control-plane-api.service
+company-control-plane-telegram-bot.service
+```
+
+The setup wizard should be accessed through SSH tunnel for the first pilot:
+
+```text
+ssh -L 3099:127.0.0.1:3099 <user>@<server-ip>
+```
+
 ## Windows Runtime
 
-The Windows install scripts place source/runtime files under:
+Windows remains a fallback/testing path. The Windows install scripts place
+source/runtime files under:
 
 ```text
 C:\Program Files\CompanyControlPlane

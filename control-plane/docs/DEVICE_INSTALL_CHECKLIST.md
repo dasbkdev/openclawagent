@@ -2,7 +2,8 @@
 
 Target devices:
 
-- Nikolay: owner/main 24/7 Windows computer.
+- Central server: Linux VPS/server owned by Nikolay.
+- Nikolay: owner/admin user.
 - Maksat: senior PM.
 - One PM device for the first rollout test.
 
@@ -28,46 +29,47 @@ tailscale status
 tailscale ip -4
 ```
 
-## Fast Install Steps For Nikolay Server
+## Fast Install Steps For Linux Central Server
 
-Use these steps only on Nikolay's always-on central server machine.
+Use these steps only on the central Linux server.
 
-1. Clone the repo on Nikolay's server machine.
-2. Open Codex with the same account and tell Codex this is Nikolay's central
+1. SSH into the server.
+2. Clone the repo on the server.
+3. Open Codex with the same account and tell Codex this is the Linux central
    server.
-3. Read the central server prep runbook:
+4. Read the central server prep runbook:
 
 ```text
-C:\agent\SERVER_PREP_RUNBOOK.md
+~/agent/SERVER_PREP_RUNBOOK.md
 ```
 
-4. Run preflight as Administrator:
+5. Run preflight:
 
-```powershell
-cd C:\agent\control-plane
-powershell.exe -ExecutionPolicy Bypass -File .\scripts\preflight-windows-server.ps1
+```bash
+cd ~/agent/control-plane
+sudo bash scripts/linux/preflight-linux-server.sh
 ```
 
-5. Preferred after clone: run source installer as Administrator:
+6. Install the central server:
 
-```powershell
-cd C:\agent\control-plane
-powershell.exe -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -InstallTelegramBot -OpenSetupWizard
+```bash
+cd ~/agent/control-plane
+sudo bash scripts/linux/install-linux.sh --start-now
 ```
 
-If a ready `.exe` was copied separately, run it as Administrator instead:
+7. Open setup through SSH tunnel:
 
-```powershell
-C:\agent\control-plane\dist\CompanyControlPlaneInstaller.exe
+```bash
+ssh -L 3099:127.0.0.1:3099 <user>@<server-ip>
 ```
 
-6. Open setup on the server if it did not open automatically:
+Then open locally:
 
 ```text
 http://127.0.0.1:3099/setup
 ```
 
-7. Fill setup:
+8. Fill setup:
 
 - Telegram bot token: paste from the secure chat, do not save in git.
 - Telegram report recipient: `984834133`.
@@ -78,13 +80,12 @@ http://127.0.0.1:3099/setup
 - Google OAuth JSON: upload client JSON.
 - Claude API key: paste and let setup store it encrypted.
 
-8. Check server tasks:
+9. Check server services:
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:3099/health
-Start-Process http://127.0.0.1:3099/setup
-Get-ScheduledTask CompanyControlPlaneApi
-Get-ScheduledTask CompanyControlPlaneTelegramBot
+```bash
+curl -fsS http://127.0.0.1:3099/health
+systemctl status company-control-plane-api.service --no-pager
+systemctl status company-control-plane-telegram-bot.service --no-pager
 ```
 
 ## Fast Client Onboarding For Maksat And PMs

@@ -60,12 +60,20 @@ repository.
 
 Target architecture:
 
-- Nikolay's always-on office computer runs the central server and central agent.
+- A Linux VPS/server controlled by Nikolay runs the central server and central
+  agent.
 - Maksat and PM devices are clients by default.
 - All role permissions are enforced by the central server.
 - Employee devices should not directly control each other's agents.
 
-Recommended development layout when source checkouts are needed:
+Recommended Linux server layout:
+
+```text
+~/agent/
+  control-plane/   # company control plane repo
+```
+
+Recommended Windows development layout when source checkouts are needed:
 
 ```text
 C:\agent\
@@ -88,7 +96,7 @@ C:\agent\kickidler\
 Path:
 
 ```text
-C:\agent\control-plane
+~/agent/control-plane
 ```
 
 Responsibilities:
@@ -102,18 +110,19 @@ Responsibilities:
 - Token usage analytics and scheduled reports.
 - Local encrypted secret storage.
 
-Important tasks on Windows after install:
+Important services on Linux after install:
 
 ```text
-CompanyControlPlaneApi
-CompanyControlPlaneTelegramBot
+company-control-plane-api.service
+company-control-plane-telegram-bot.service
 ```
 
 Production install paths:
 
 ```text
-C:\Program Files\CompanyControlPlane
-C:\ProgramData\CompanyControlPlane
+/opt/company-control-plane
+/etc/company-control-plane/control-plane.env
+/var/lib/company-control-plane
 ```
 
 ### OpenClaw
@@ -188,12 +197,12 @@ OWNER
 
 Nikolay is the top of the hierarchy.
 
-His computer is the main always-on office machine. It should be treated as the
+The central Linux server is controlled by Nikolay and should be treated as the
 central control-plane node.
 
 Important facts:
 
-- The computer should stay powered on 24/7.
+- The server should stay powered on 24/7.
 - It should be connected to the company private VPN/tailnet.
 - It should host the main control-plane API and Telegram bot tasks.
 - Other devices connect over the private VPN network.
@@ -265,8 +274,8 @@ senior PM devices can be Windows, macOS, or Linux.
 Primary VPN choice:
 
 - Tailscale should be the default private network for all new installs.
-- Nikolay's always-on office computer joins the same Tailscale tailnet and stays
-  the main control-plane node.
+- The central Linux server joins the same Tailscale tailnet and stays the main
+  control-plane node.
 - Other employee devices join that same tailnet.
 - Each device should have a stable Tailscale IPv4 address and, if enabled, a
   MagicDNS hostname.
@@ -286,7 +295,7 @@ Suggested device inventory table to maintain later:
 
 ```text
 Role       Name      Device                  VPN        Private IP/MagicDNS       Notes
-OWNER      Nikolay   Office always-on PC      Tailscale  <fill later>             Main 24/7 node
+OWNER      Nikolay   Central Linux server     Tailscale  <fill later>             Main 24/7 node
 SENIOR_PM  Maksat    Maksat PC/Mac/Linux      Tailscale  <fill later>             Reports to Nikolay
 PM         PM 1      PM test device           Tailscale  <fill later>             First PM rollout
 ```
@@ -382,18 +391,18 @@ Ask or infer:
 - If Tailscale is unavailable, is ZeroTier installed and connected?
 - Only for Windows-only fallback: is Radmin VPN installed and connected?
 
-Default Windows path:
+Default Linux server path:
 
 ```text
-C:\agent\control-plane
+~/agent/control-plane
 ```
 
 ### Step 2: Check Repository
 
 Use:
 
-```powershell
-cd C:\agent\control-plane
+```bash
+cd ~/agent/control-plane
 git status --short
 git log --oneline -5
 ```
@@ -402,33 +411,46 @@ Do not run destructive git commands.
 
 If no remote exists, ask the user before adding one.
 
-### Step 3: Install On Windows
+### Step 3: Install On Linux Central Server
 
-Preferred after clone:
+Run preflight:
+
+```bash
+cd ~/agent/control-plane
+sudo bash scripts/linux/preflight-linux-server.sh
+```
+
+Install:
+
+```bash
+cd ~/agent/control-plane
+sudo bash scripts/linux/install-linux.sh --start-now
+```
+
+Open setup through SSH tunnel:
+
+```bash
+ssh -L 3099:127.0.0.1:3099 <user>@<server-ip>
+```
+
+Check:
+
+```bash
+curl -fsS http://127.0.0.1:3099/health
+systemctl status company-control-plane-api.service --no-pager
+systemctl status company-control-plane-telegram-bot.service --no-pager
+```
+
+### Step 4: Windows Fallback
+
+Windows remains a fallback/testing path:
 
 ```powershell
 cd C:\agent\control-plane
 powershell.exe -ExecutionPolicy Bypass -File .\scripts\install-windows.ps1 -InstallTelegramBot -OpenSetupWizard
 ```
 
-If the prepared `.exe` was copied separately:
-
-```powershell
-C:\agent\control-plane\dist\CompanyControlPlaneInstaller.exe
-```
-
-Run as Administrator.
-
-Check:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:3099/health
-Start-Process http://127.0.0.1:3099/setup
-Get-ScheduledTask CompanyControlPlaneApi
-Get-ScheduledTask CompanyControlPlaneTelegramBot
-```
-
-### Step 4: Install On macOS
+### Step 5: macOS Client/Development Fallback
 
 Build artifacts on a Mac:
 
@@ -440,31 +462,10 @@ chmod +x scripts/macos/*.sh
 ./scripts/macos/build-macos-dmg.sh
 ```
 
-Then install the `.pkg` or open the `.app`.
-
 Important:
 
 - macOS scripts exist but must be tested on a real Mac.
 - Code signing and notarization are not configured yet.
-
-### Step 5: Linux
-
-Linux packaging is not fully productionized yet.
-
-Temporary run method:
-
-```bash
-cd /opt/company-control-plane
-npm test
-npm start
-```
-
-Recommended future work:
-
-- systemd service for API;
-- systemd service for Telegram bot;
-- install script mirroring Windows behavior;
-- encrypted secret backend appropriate for Linux.
 
 ## Setup Wizard Values
 
@@ -500,17 +501,17 @@ Do not put any of these secrets into git.
 
 ## Role-Specific Install Notes
 
-### Nikolay Device Install
+### Central Linux Server Install
 
 This is the main always-on node.
 
 The AI should:
 
-- install control-plane API task;
-- install Telegram bot task;
+- install control-plane API systemd service;
+- install Telegram bot systemd service;
 - configure setup wizard;
-- confirm `CompanyControlPlaneApi` starts at boot;
-- confirm `CompanyControlPlaneTelegramBot` starts at boot;
+- confirm `company-control-plane-api.service` starts at boot;
+- confirm `company-control-plane-telegram-bot.service` starts at boot;
 - confirm Tailscale is connected;
 - record Tailscale IP and MagicDNS name in handoff notes;
 - confirm Telegram bot can respond;
@@ -567,31 +568,31 @@ The AI should:
 
 After install, verify:
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:3099/health
-Invoke-RestMethod http://127.0.0.1:3099/api/v1/setup/model-policy
+```bash
+curl -fsS http://127.0.0.1:3099/health
+curl -fsS http://127.0.0.1:3099/api/v1/setup/model-policy
 ```
 
-Check scheduled tasks on Windows:
+Check systemd services on Linux:
 
-```powershell
-Get-ScheduledTask CompanyControlPlaneApi
-Get-ScheduledTask CompanyControlPlaneTelegramBot
+```bash
+systemctl status company-control-plane-api.service --no-pager
+systemctl status company-control-plane-telegram-bot.service --no-pager
 ```
 
 Check logs:
 
-```text
-C:\ProgramData\CompanyControlPlane\server.out.log
-C:\ProgramData\CompanyControlPlane\server.err.log
+```bash
+journalctl -u company-control-plane-api.service -n 80 --no-pager
+journalctl -u company-control-plane-telegram-bot.service -n 80 --no-pager
 ```
 
 Check setup state:
 
 ```text
-C:\ProgramData\CompanyControlPlane\runtime-config.json
-C:\ProgramData\CompanyControlPlane\secrets.json
-C:\ProgramData\CompanyControlPlane\secrets.key
+/var/lib/company-control-plane/runtime-config.json
+/var/lib/company-control-plane/secrets.json
+/var/lib/company-control-plane/secrets.key
 ```
 
 Do not print secret values into chat unless the user explicitly requests it and
@@ -602,24 +603,24 @@ understands the risk.
 - Bitrix credentials are pending.
 - OpenClaw does not yet automatically emit token usage events into the control
   plane.
-- Linux install service scripts are not finished.
 - macOS `.pkg/.dmg` needs real-device testing.
 - Production storage should move from JSON to Postgres.
-- Local secret key should move to Windows DPAPI, macOS Keychain, or managed
-  secret storage.
+- Local secret key should move to a managed secret store or Linux key management
+  strategy.
 - Real Metricon connector still needs to be mapped from OpenAPI report schemas.
 
 ## Files To Read First On A New Device
 
 ```text
-C:\agent\AI_DEVICE_INSTALLATION_PLAYBOOK.md
-C:\agent\CODEX_WORKLOG_FOR_CLAUDE.md
-C:\agent\control-plane\README.md
-C:\agent\control-plane\docs\DEVICE_INSTALL_CHECKLIST.md
-C:\agent\control-plane\docs\METRICON_API.md
-C:\agent\control-plane\docs\TOKEN_USAGE_ANALYTICS.md
-C:\agent\control-plane\docs\CLAUDE_MODEL_POLICY.md
-C:\agent\control-plane\docs\WINDOWS_INSTALL.md
+~/agent/AI_DEVICE_INSTALLATION_PLAYBOOK.md
+~/agent/CODEX_WORKLOG_FOR_CLAUDE.md
+~/agent/SERVER_PREP_RUNBOOK.md
+~/agent/control-plane/README.md
+~/agent/control-plane/docs/DEVICE_INSTALL_CHECKLIST.md
+~/agent/control-plane/docs/LINUX_INSTALL.md
+~/agent/control-plane/docs/METRICON_API.md
+~/agent/control-plane/docs/TOKEN_USAGE_ANALYTICS.md
+~/agent/control-plane/docs/CLAUDE_MODEL_POLICY.md
 ```
 
 If paths differ, locate the same files under the cloned `agent` or

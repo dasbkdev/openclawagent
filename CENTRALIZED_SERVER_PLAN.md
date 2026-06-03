@@ -27,17 +27,17 @@ What changes:
 
 MVP location:
 
-- Nikolay's always-on office computer.
-- This machine stays powered on 24/7.
+- Rented Linux server/VPS controlled by Nikolay.
+- This server stays powered on 24/7.
 - It runs the main control-plane API.
 - It runs the Telegram bot process.
 - It runs scheduled jobs and token usage reports.
 - It stores encrypted integration secrets and runtime state.
 
-Future production option:
+Fallback option:
 
-- Move the same server to a VPS or dedicated office server.
-- Keep Nikolay as owner/admin, but remove dependence on one workstation.
+- Nikolay's office computer can still be used for Windows-only testing, but it
+  is no longer the preferred central server path.
 
 ## Network
 

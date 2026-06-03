@@ -9,6 +9,13 @@ Start here for the rented/central server setup:
 SERVER_PREP_RUNBOOK.md
 ```
 
+Linux production install docs:
+
+```text
+control-plane\docs\LINUX_INSTALL.md
+control-plane\scripts\linux\
+```
+
 Main server code:
 
 ```text
@@ -27,6 +34,7 @@ Important safety rules:
 Current architecture:
 
 - one centralized server/agent;
+- Linux is the preferred central server target;
 - Nikolay is OWNER;
 - Maksat is SENIOR_PM;
 - three PM users are clients under Maksat;

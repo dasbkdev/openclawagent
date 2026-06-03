@@ -24,7 +24,29 @@ contracts outside Metricon and OpenClaw.
 - Sends automatic token usage reports to Telegram id `984834133`.
 - Uses a JSON file store for MVP speed and easy review.
 
-## Run
+## Linux Central Server Install
+
+Linux is the preferred central server target. See:
+
+```text
+docs\LINUX_INSTALL.md
+```
+
+Fast path after cloning on the server:
+
+```bash
+sudo bash scripts/linux/preflight-linux-server.sh
+sudo bash scripts/linux/install-linux.sh --start-now
+```
+
+The installer registers:
+
+```text
+company-control-plane-api.service
+company-control-plane-telegram-bot.service
+```
+
+## Run Locally
 
 ```powershell
 cd C:\Users\dasmu\agent\control-plane
@@ -40,9 +62,9 @@ Setup wizard:
 http://127.0.0.1:3099/setup
 ```
 
-## Windows Install
+## Windows Install Fallback
 
-For Nikolay's always-on Windows computer, see:
+For Windows testing/fallback, see:
 
 ```text
 docs\WINDOWS_INSTALL.md
