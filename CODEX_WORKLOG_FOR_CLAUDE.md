@@ -104,6 +104,59 @@ Continue development. Add the next step and record all work in a file under
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Central Server Preparation Pack
+
+### User Request
+
+The user bought a server that should become the centralized server. Prepare the
+repository and instructions so Codex can configure it later after receiving
+temporary server access credentials.
+
+### Implemented
+
+- Added root runbook:
+  - `SERVER_PREP_RUNBOOK.md`
+- Added Windows preflight script:
+  - `control-plane\scripts\preflight-windows-server.ps1`
+- Updated Windows install docs to run server preflight before installing:
+  - `control-plane\docs\WINDOWS_INSTALL.md`
+- Updated device install checklist so Nikolay/central server setup starts with
+  the server prep runbook and preflight script:
+  - `control-plane\docs\DEVICE_INSTALL_CHECKLIST.md`
+- Filled root `README.md` with the central server starting point and repository
+  safety rules.
+
+### Server Prep Summary
+
+- Server is the central control-plane node.
+- Other devices are clients by default.
+- Preflight checks Administrator rights, Windows version, CPU, RAM, disk, Git,
+  Node.js, Tailscale, API port `3099`, install/data dirs, and scheduled tasks.
+- Secrets must still be entered through setup wizard and not committed to git.
+- The user should provide only temporary remote login credentials and rotate
+  them after setup.
+
+### Verification
+
+- Documentation and PowerShell script only.
+- Ran `control-plane` tests: 29/29 passed.
+- Ran preflight script locally in JSON mode; it produced the expected server
+  readiness report. Local session was not elevated, so Administrator check
+  failed as expected.
+- Scanned for real Telegram/Claude secrets; only placeholders/test values were
+  found.
+- No source code, secrets, OpenClaw files, or Metricon/Kickidler files were
+  modified.
+
+### Open Risks
+
+- Need to run preflight on the actual server.
+- Need to know if the rented server is Windows Server, Windows 10, or Windows
+  11.
+- Need server IP/host, temporary Windows credentials, and GitHub access method
+  if the repository is private.
+- Need Tailscale tailnet/auth plan before client devices connect.
+
 ## 2026-06-03 - Centralized Server Architecture Plan
 
 ### User Request

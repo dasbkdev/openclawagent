@@ -35,7 +35,20 @@ Use these steps only on Nikolay's always-on central server machine.
 1. Clone the repo on Nikolay's server machine.
 2. Open Codex with the same account and tell Codex this is Nikolay's central
    server.
-3. Preferred after clone: run source installer as Administrator:
+3. Read the central server prep runbook:
+
+```text
+C:\agent\SERVER_PREP_RUNBOOK.md
+```
+
+4. Run preflight as Administrator:
+
+```powershell
+cd C:\agent\control-plane
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\preflight-windows-server.ps1
+```
+
+5. Preferred after clone: run source installer as Administrator:
 
 ```powershell
 cd C:\agent\control-plane
@@ -48,13 +61,13 @@ If a ready `.exe` was copied separately, run it as Administrator instead:
 C:\agent\control-plane\dist\CompanyControlPlaneInstaller.exe
 ```
 
-4. Open setup on the server if it did not open automatically:
+6. Open setup on the server if it did not open automatically:
 
 ```text
 http://127.0.0.1:3099/setup
 ```
 
-5. Fill setup:
+7. Fill setup:
 
 - Telegram bot token: paste from the secure chat, do not save in git.
 - Telegram report recipient: `984834133`.
@@ -65,7 +78,7 @@ http://127.0.0.1:3099/setup
 - Google OAuth JSON: upload client JSON.
 - Claude API key: paste and let setup store it encrypted.
 
-6. Check server tasks:
+8. Check server tasks:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:3099/health

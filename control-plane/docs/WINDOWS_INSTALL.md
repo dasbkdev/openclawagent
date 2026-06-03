@@ -2,6 +2,24 @@
 
 This install flow is for Nikolay's always-on Windows computer.
 
+## Server Preflight
+
+Before installation, run the central server prep checklist:
+
+```text
+C:\agent\SERVER_PREP_RUNBOOK.md
+```
+
+Then run PowerShell as Administrator:
+
+```powershell
+cd C:\agent\control-plane
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\preflight-windows-server.ps1
+```
+
+Fix any `FAIL` result before installing. `WARN` results can be acceptable for a
+pilot if the runbook explains the tradeoff.
+
 ## Option A: Install From Source Clone
 
 Open PowerShell as Administrator:
