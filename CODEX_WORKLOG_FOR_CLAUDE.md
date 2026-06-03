@@ -124,6 +124,13 @@ Try connecting to the Linux server over SSH as `root`.
 
 Provide the corrected server IP/hostname, then retry SSH.
 
+### Retry After User Reconnected Wi-Fi
+
+- Retried the same host after the user reconnected Wi-Fi.
+- Result stayed the same: `114.29.263.103` is still invalid IPv4 and OpenSSH
+  fails before network/authentication.
+- Need corrected IP/hostname.
+
 ## 2026-06-03 - Create Server Branch And Push Attempt
 
 ### User Request
