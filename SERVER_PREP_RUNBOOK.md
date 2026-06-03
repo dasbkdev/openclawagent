@@ -137,6 +137,43 @@ The script checks:
 If Node.js is missing, the installer can download portable Node.js during
 install. Git and Tailscale should normally be installed before production setup.
 
+## SSH Connectivity Troubleshooting
+
+If RDP works but SSH from Codex times out, the password has not been checked
+yet. A timeout usually means port `22` is blocked by Windows Firewall, provider
+firewall/security group, or `sshd` is not listening on the public interface.
+
+On the server, open PowerShell as Administrator and run:
+
+```powershell
+Get-Service sshd
+Get-NetTCPConnection -LocalPort 22 -State Listen -ErrorAction SilentlyContinue
+Get-NetFirewallRule -Name sshd -ErrorAction SilentlyContinue
+```
+
+If the firewall rule is missing, create it:
+
+```powershell
+New-NetFirewallRule `
+  -Name sshd `
+  -DisplayName "OpenSSH Server (sshd)" `
+  -Enabled True `
+  -Direction Inbound `
+  -Protocol TCP `
+  -Action Allow `
+  -LocalPort 22
+```
+
+If the server provider has a separate firewall/security group, allow inbound
+TCP `22`. Safer option: allow it only from the operator's current public IP
+instead of the whole internet.
+
+After changing firewall settings, test from the operator machine:
+
+```powershell
+ssh -o ConnectTimeout=12 ssh@<server-ip> hostname
+```
+
 ## Install Flow
 
 1. Log in through RDP or local console.

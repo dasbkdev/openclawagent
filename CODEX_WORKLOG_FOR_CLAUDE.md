@@ -104,6 +104,43 @@ Continue development. Add the next step and record all work in a file under
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Server SSH Connectivity Attempt
+
+### User Request
+
+The user provided remote server SSH access details and asked Codex to try
+connecting.
+
+### Result
+
+- Did not store or commit the provided password.
+- Checked local tools:
+  - OpenSSH client exists.
+  - Python `paramiko` exists.
+- Tested TCP/SSH access to the server IP.
+- SSH port `22` timed out before authentication, so the password was not tested.
+- RDP port `3389` is reachable from the current machine.
+- Current public IP for firewall allowlisting was checked separately in the
+  terminal.
+
+### Diagnosis
+
+The server is reachable, but SSH is blocked externally. Likely causes:
+
+- Windows Firewall does not allow inbound TCP `22`;
+- provider firewall/security group does not allow inbound TCP `22`;
+- `sshd` is not listening on public interface/port `22`;
+- SSH service is running, but only RDP is exposed publicly.
+
+### Implemented
+
+- Added SSH troubleshooting notes to `SERVER_PREP_RUNBOOK.md`.
+
+### Next Required User/Server Action
+
+Log in through RDP or provider console and open inbound TCP `22`, ideally only
+from the operator's current public IP. Then ask Codex to retry SSH.
+
 ## 2026-06-03 - Central Server Preparation Pack
 
 ### User Request
