@@ -1,0 +1,20 @@
+# Local/proprietary checkouts. Do not push these into the deployment repo.
+kickidler/
+metricon/
+Metricon/
+
+# Upstream checkout. Clone/manage it separately unless intentionally added as a submodule.
+openclaw/
+
+# Runtime state and secrets.
+**/.env
+**/.env.*
+!**/.env.example
+**/data/
+**/dist/
+**/node_modules/
+**/secrets.json
+**/secrets.key
+**/runtime-config.json
+**/*.log
+
