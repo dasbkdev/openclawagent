@@ -187,7 +187,7 @@ central control-plane node.
 Important facts:
 
 - The computer should stay powered on 24/7.
-- It is expected to run Radmin VPN.
+- It should be connected to the company private VPN/tailnet.
 - It should host the main control-plane API and Telegram bot tasks.
 - Other devices connect over the private VPN network.
 - Nikolay's agent can collect data from all lower-level agents and manage them.
@@ -251,26 +251,36 @@ The most important read targets for the agent are:
 
 ## Network Model
 
-The planned network is VPN-based.
+The planned network is VPN-based, but it must be cross-platform because PM and
+senior PM devices can be Windows, macOS, or Linux.
 
-Current assumption:
+Primary VPN choice:
 
-- Nikolay's always-on office computer creates/joins the private Radmin VPN
-  network.
-- Other devices join the same private Radmin VPN network.
-- Each device receives a stable Radmin VPN IP.
-- Agents communicate over this private network.
+- Tailscale should be the default private network for all new installs.
+- Nikolay's always-on office computer joins the same Tailscale tailnet and stays
+  the main control-plane node.
+- Other employee devices join that same tailnet.
+- Each device should have a stable Tailscale IPv4 address and, if enabled, a
+  MagicDNS hostname.
+- Agents communicate with Nikolay's control-plane API through this private
+  Tailscale address or hostname.
 
-The AI installer should record or ask the user for each device's VPN IP during
-installation.
+Fallback choices:
+
+- ZeroTier is the preferred backup if Tailscale cannot be used.
+- Radmin VPN is Windows-only fallback/legacy and must not be the default plan
+  for mixed Windows/macOS/Linux rollout.
+
+The AI installer should record or ask the user for each device's VPN provider,
+Tailscale IP, MagicDNS name, and role during installation.
 
 Suggested device inventory table to maintain later:
 
 ```text
-Role       Name      Device                  Radmin VPN IP      Notes
-OWNER      Nikolay   Office always-on PC      <fill later>       Main node
-SENIOR_PM  Maksat    Maksat PC/Mac/Linux      <fill later>       Reports to Nikolay
-PM         PM 1      PM test device           <fill later>       First PM rollout
+Role       Name      Device                  VPN        Private IP/MagicDNS       Notes
+OWNER      Nikolay   Office always-on PC      Tailscale  <fill later>             Main 24/7 node
+SENIOR_PM  Maksat    Maksat PC/Mac/Linux      Tailscale  <fill later>             Reports to Nikolay
+PM         PM 1      PM test device           Tailscale  <fill later>             First PM rollout
 ```
 
 ## Default Model Policy
@@ -358,8 +368,11 @@ Ask or infer:
 - Is this Windows, macOS, or Linux?
 - Is the repo already cloned?
 - What is the local path?
-- Is Radmin VPN installed and connected?
-- What is this device's Radmin VPN IP?
+- Is Tailscale installed and connected to the company tailnet?
+- What is this device's Tailscale IPv4 address?
+- What is this device's MagicDNS name, if MagicDNS is enabled?
+- If Tailscale is unavailable, is ZeroTier installed and connected?
+- Only for Windows-only fallback: is Radmin VPN installed and connected?
 
 Default Windows path:
 
@@ -490,8 +503,8 @@ The AI should:
 - configure setup wizard;
 - confirm `CompanyControlPlaneApi` starts at boot;
 - confirm `CompanyControlPlaneTelegramBot` starts at boot;
-- confirm Radmin VPN is connected;
-- record VPN IP in handoff notes;
+- confirm Tailscale is connected;
+- record Tailscale IP and MagicDNS name in handoff notes;
 - confirm Telegram bot can respond;
 - create or verify invite codes for Maksat and PMs.
 
@@ -501,7 +514,8 @@ The AI should:
 
 - clone `control-plane` and `openclaw` side by side;
 - install local runtime if needed;
-- join Radmin VPN;
+- join Tailscale tailnet;
+- record Tailscale IP and MagicDNS name;
 - register Maksat through Telegram invite code;
 - confirm Maksat can see own and subordinate PM data only;
 - confirm Maksat cannot manage Nikolay.
@@ -511,7 +525,8 @@ The AI should:
 The AI should:
 
 - clone `control-plane` and `openclaw` side by side;
-- join Radmin VPN;
+- join Tailscale tailnet;
+- record Tailscale IP and MagicDNS name;
 - register PM through Telegram invite code;
 - confirm PM can see only own user/project scope;
 - verify report commands with mock or real Metricon once token is configured.

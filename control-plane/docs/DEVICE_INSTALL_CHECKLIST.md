@@ -14,8 +14,18 @@ Target devices:
 - Keep Telegram bot token out of git. Paste it into the setup wizard after
   install.
 - Bitrix webhook/API details are still pending.
-- Confirm Radmin VPN is installed and the private network is connected.
-- Write down each device's Radmin VPN IP and role.
+- Install Tailscale on every target device and join the same company tailnet.
+- Confirm Tailscale is connected before configuring agent-to-agent traffic.
+- Write down each device's role, Tailscale IPv4 address, and MagicDNS name if
+  MagicDNS is enabled.
+- Use ZeroTier as the backup VPN if Tailscale cannot be used.
+- Use Radmin VPN only as a Windows-only fallback/legacy option.
+- On devices where the Tailscale CLI is available, verify with:
+
+```powershell
+tailscale status
+tailscale ip -4
+```
 
 ## Fast Install Steps
 

@@ -104,6 +104,47 @@ Continue development. Add the next step and record all work in a file under
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - VPN Plan Change To Tailscale
+
+### User Request
+
+Radmin VPN does not install on macOS, so the mixed Windows/macOS/Linux rollout
+needs a different private network plan.
+
+### Decision
+
+- Use Tailscale as the primary VPN/tailnet for all new installs.
+- Keep Nikolay's always-on Windows office computer as the main 24/7
+  control-plane node.
+- Connect Maksat and PM devices to the same Tailscale tailnet.
+- Record each device's role, Tailscale IPv4 address, and MagicDNS name if
+  MagicDNS is enabled.
+- Use ZeroTier as the backup VPN if Tailscale cannot be used.
+- Treat Radmin VPN as Windows-only fallback/legacy, not the default rollout
+  path.
+
+### Implemented
+
+- Updated `AI_DEVICE_INSTALLATION_PLAYBOOK.md` network model from Radmin-first
+  to Tailscale-first.
+- Updated `control-plane\docs\DEVICE_INSTALL_CHECKLIST.md` with Tailscale
+  install/verification checklist and Radmin fallback note.
+- No source code, secrets, OpenClaw files, or Metricon/Kickidler files were
+  modified.
+
+### Verification
+
+- Searched docs for remaining Radmin references.
+- Remaining Radmin mentions are explicitly labeled Windows-only fallback/legacy.
+
+### Open Risks
+
+- Tailscale account/tailnet ownership still needs to be created or confirmed.
+- ACL rules are not configured yet. Before production, restrict device access so
+  PM devices can reach only the required control-plane endpoints.
+- Need to test real Windows/macOS/Linux installation flows on the target
+  devices.
+
 ## 2026-06-03 - Remote Upload Prep, Metricon Naming, Device Install Checklist
 
 ### User Request
