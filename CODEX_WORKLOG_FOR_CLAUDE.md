@@ -104,6 +104,90 @@ Continue development. Add the next step and record all work in a file under
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Linux Server Deployment On starlabagent.pp.ua
+
+### User Request
+
+Clone `dasbkdev/openclawagent.git` on the Linux server, set up the central
+server, and configure SSL for domain `starlabagent.pp.ua`.
+
+### Server
+
+- Host/IP:
+  - `starlabagent.pp.ua`
+  - `114.29.236.103`
+- OS:
+  - Ubuntu 22.04.5 LTS
+- Hostname:
+  - `starlabit`
+- Server resources:
+  - 2 logical CPUs
+  - about 3.8 GiB RAM
+  - about 71 GiB free disk on `/`
+
+### Implemented On Server
+
+- Installed base dependencies:
+  - Git
+  - Node.js `v22.22.3`
+  - npm `10.9.8`
+  - Tailscale `1.98.4`
+  - Nginx
+  - Certbot
+  - Apache htpasswd utilities
+- Cloned GitHub repository:
+  - `/root/agent`
+  - branch `server`
+- Ran control-plane tests on the server:
+  - 29/29 passed.
+- Installed Linux central server services:
+  - `company-control-plane-api.service`
+  - `company-control-plane-telegram-bot.service`
+- Installed app paths:
+  - `/opt/company-control-plane`
+  - `/etc/company-control-plane/control-plane.env`
+  - `/var/lib/company-control-plane`
+- Configured Nginx reverse proxy:
+  - public HTTP/HTTPS on `starlabagent.pp.ua`
+  - upstream Node API remains local on `127.0.0.1:3099`
+- Issued Let's Encrypt certificate:
+  - `starlabagent.pp.ua`
+  - expires `2026-09-01`
+  - auto-renewal scheduled through `certbot.timer`
+- Added Basic Auth in front of HTTPS web access.
+  - Credentials are stored on the server at:
+    - `/root/starlabagent-basic-auth.txt`
+  - Do not commit those credentials.
+
+### Verification
+
+- `curl http://127.0.0.1:3099/health` returned OK.
+- `https://starlabagent.pp.ua/health` returned OK with Basic Auth.
+- `https://starlabagent.pp.ua/setup` returned the setup wizard HTML with Basic
+  Auth.
+- `company-control-plane-api.service` is active and enabled.
+- `company-control-plane-telegram-bot.service` is active and enabled.
+- `nginx` is active and enabled.
+- Ports listening:
+  - `22` SSH
+  - `80` HTTP redirect/challenge
+  - `443` HTTPS
+  - `127.0.0.1:3099` local Node API
+
+### Open Items
+
+- Tailscale is installed but still logged out. Need tailnet auth/login.
+- Setup wizard still needs production secrets:
+  - Nikolay Telegram numeric ID
+  - Telegram bot token
+  - Claude API key
+  - Metricon token
+  - Bitrix credentials
+  - Google OAuth JSON
+- Rotate the root SSH password after setup because it was shared in chat.
+- Consider creating a non-root sudo user and disabling root password login after
+  access is stabilized.
+
 ## 2026-06-03 - Linux Server SSH Attempt With Invalid IP
 
 ### User Request
