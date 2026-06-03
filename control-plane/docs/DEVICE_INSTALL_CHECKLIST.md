@@ -15,7 +15,8 @@ Target devices:
   install.
 - Bitrix webhook/API details are still pending.
 - Install Tailscale on every target device and join the same company tailnet.
-- Confirm Tailscale is connected before configuring agent-to-agent traffic.
+- Confirm Tailscale is connected before configuring access to the central
+  server.
 - Write down each device's role, Tailscale IPv4 address, and MagicDNS name if
   MagicDNS is enabled.
 - Use ZeroTier as the backup VPN if Tailscale cannot be used.
@@ -27,10 +28,13 @@ tailscale status
 tailscale ip -4
 ```
 
-## Fast Install Steps
+## Fast Install Steps For Nikolay Server
 
-1. Clone the repo on the target device.
-2. Open Codex with the same account and tell Codex which device it is.
+Use these steps only on Nikolay's always-on central server machine.
+
+1. Clone the repo on Nikolay's server machine.
+2. Open Codex with the same account and tell Codex this is Nikolay's central
+   server.
 3. Preferred after clone: run source installer as Administrator:
 
 ```powershell
@@ -44,7 +48,7 @@ If a ready `.exe` was copied separately, run it as Administrator instead:
 C:\agent\control-plane\dist\CompanyControlPlaneInstaller.exe
 ```
 
-4. Open setup if it did not open automatically:
+4. Open setup on the server if it did not open automatically:
 
 ```text
 http://127.0.0.1:3099/setup
@@ -61,7 +65,7 @@ http://127.0.0.1:3099/setup
 - Google OAuth JSON: upload client JSON.
 - Claude API key: paste and let setup store it encrypted.
 
-6. Check:
+6. Check server tasks:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:3099/health
@@ -69,6 +73,24 @@ Start-Process http://127.0.0.1:3099/setup
 Get-ScheduledTask CompanyControlPlaneApi
 Get-ScheduledTask CompanyControlPlaneTelegramBot
 ```
+
+## Fast Client Onboarding For Maksat And PMs
+
+Do not install always-on API/bot tasks on Maksat or PM devices by default.
+
+1. Install Tailscale and join the same company tailnet as Nikolay's server.
+2. Record the device role, Tailscale IPv4 address, and MagicDNS name.
+3. Register the user through the Telegram invite code from Nikolay.
+4. Point the user to the central Telegram bot and, when available, central web
+   UI URL.
+5. Verify RBAC:
+
+- Maksat can see own data plus subordinate PM data.
+- Maksat cannot manage Nikolay or OWNER-only settings.
+- PM can see only own user/project scope.
+
+Clone `control-plane` or `openclaw` on client devices only for
+development/testing or if a future local bridge is required.
 
 ## Notes
 

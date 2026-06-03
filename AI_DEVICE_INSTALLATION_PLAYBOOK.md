@@ -39,9 +39,9 @@ C:\Users\dasmu\agent\control-plane
 
 ## Project Summary
 
-The product is a company control plane for AI agents working with employee
-hierarchy, Telegram, Metricon, Bitrix, Google services, Jira, Gmail, and
-OpenClaw.
+The product is a centralized company control plane for AI agents working with
+employee hierarchy, Telegram, Metricon, Bitrix, Google services, Jira, Gmail,
+and OpenClaw.
 
 The control plane owns company-specific logic:
 
@@ -58,7 +58,14 @@ OpenClaw is the agent runtime / gateway layer. It should live next to the
 control plane as a separate checkout, not copied inside the `control-plane`
 repository.
 
-Recommended layout on every target device:
+Target architecture:
+
+- Nikolay's always-on office computer runs the central server and central agent.
+- Maksat and PM devices are clients by default.
+- All role permissions are enforced by the central server.
+- Employee devices should not directly control each other's agents.
+
+Recommended development layout when source checkouts are needed:
 
 ```text
 C:\agent\
@@ -190,7 +197,8 @@ Important facts:
 - It should be connected to the company private VPN/tailnet.
 - It should host the main control-plane API and Telegram bot tasks.
 - Other devices connect over the private VPN network.
-- Nikolay's agent can collect data from all lower-level agents and manage them.
+- The central agent can act with Nikolay's OWNER scope and collect all allowed
+  company data.
 - Automatic token usage reports must go only to Telegram user id:
 
 ```text
@@ -207,11 +215,11 @@ SENIOR_PM
 
 Maksat reports to Nikolay.
 
-His agent:
+The central agent acting for Maksat:
 
-- cannot manage Nikolay's agent;
+- cannot manage Nikolay or OWNER-only settings;
 - can report to Nikolay;
-- can collect data from subordinate PM agents;
+- can collect allowed data for subordinate PMs through central connectors;
 - can prepare summary reports for Nikolay.
 
 ### Project Managers
@@ -512,11 +520,14 @@ The AI should:
 
 The AI should:
 
-- clone `control-plane` and `openclaw` side by side;
-- install local runtime if needed;
 - join Tailscale tailnet;
-- record Tailscale IP and MagicDNS name;
 - register Maksat through Telegram invite code;
+- point Maksat to the central server or Telegram bot;
+- avoid installing always-on API/bot tasks on Maksat's device unless explicitly
+  requested for development/testing;
+- optionally clone `control-plane` and `openclaw` side by side for development;
+- install local runtime only if needed for development/testing;
+- record Tailscale IP and MagicDNS name;
 - confirm Maksat can see own and subordinate PM data only;
 - confirm Maksat cannot manage Nikolay.
 
@@ -524,10 +535,13 @@ The AI should:
 
 The AI should:
 
-- clone `control-plane` and `openclaw` side by side;
 - join Tailscale tailnet;
 - record Tailscale IP and MagicDNS name;
 - register PM through Telegram invite code;
+- point PM to the central server or Telegram bot;
+- avoid installing always-on API/bot tasks on PM devices unless explicitly
+  requested for development/testing;
+- optionally clone `control-plane` and `openclaw` side by side for development;
 - confirm PM can see only own user/project scope;
 - verify report commands with mock or real Metricon once token is configured.
 

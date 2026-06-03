@@ -1,6 +1,8 @@
 # Architecture
 
-This service is intentionally separate from Metricon and OpenClaw.
+This service is intentionally separate from Metricon and OpenClaw. The target
+runtime model is centralized: one always-on server runs the company control
+plane and central agent, while employee devices act as clients.
 
 ```text
 Telegram Bot / OpenClaw channel
@@ -13,8 +15,27 @@ Telegram Bot / OpenClaw channel
 ## Boundaries
 
 - Metricon remains the monitoring/reporting source of truth.
-- OpenClaw remains the agent runtime and channel/gateway layer.
+- OpenClaw remains the agent runtime and channel/gateway layer when a local
+  runtime or bridge is needed.
 - Company Control Plane owns company-specific authorization and audit.
+- Employee devices do not decide permissions and do not directly manage each
+  other's agents.
+
+## Centralized Server Model
+
+For the MVP, Nikolay's always-on office computer is the central server. It runs:
+
+- the HTTP API;
+- the setup wizard;
+- the Telegram bot;
+- scheduled token usage reports;
+- encrypted secret storage;
+- connector calls;
+- the central agent/orchestrator.
+
+Maksat and PM devices should be treated as clients by default. They connect to
+the central server through Telegram, central web UI, or a future local OpenClaw
+bridge. The central server applies RBAC for every request.
 
 ## MVP Data Model
 

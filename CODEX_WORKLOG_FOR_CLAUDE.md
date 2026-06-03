@@ -104,6 +104,61 @@ Continue development. Add the next step and record all work in a file under
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Centralized Server Architecture Plan
+
+### User Request
+
+Change the architecture plan so there is one centralized server with one
+centralized agent. Nikolay, Maksat, and the three PMs should address this central
+server/agent. The role hierarchy remains unchanged.
+
+### Decision
+
+- The product should move from "multiple devices with agents managing each
+  other" to "one central server plus client devices".
+- Nikolay's always-on office computer is the MVP central server.
+- The central server runs the control-plane API, Telegram bot, setup wizard,
+  scheduler, encrypted secrets, connectors, token analytics, and central
+  agent/orchestrator.
+- Maksat and PM devices are clients by default.
+- Tailscale remains the primary private network so clients can reach the central
+  server, but clients do not need peer-to-peer access.
+- RBAC stays the same:
+  - OWNER: all users/projects.
+  - SENIOR_PM: self plus subordinate PMs.
+  - PM: own user/project scope.
+
+### Implemented
+
+- Added `CENTRALIZED_SERVER_PLAN.md` with the detailed target architecture,
+  request flows, component responsibilities, connector strategy, security
+  requirements, migration plan, and open questions.
+- Updated `AI_DEVICE_INSTALLATION_PLAYBOOK.md` so future installers understand
+  Nikolay's machine is the central server and Maksat/PM devices are clients by
+  default.
+- Updated `control-plane\docs\DEVICE_INSTALL_CHECKLIST.md` so the full
+  installer is for Nikolay's central server, while Maksat/PM devices use client
+  onboarding unless development/testing is explicitly needed.
+- Updated `control-plane\docs\ARCHITECTURE.md` with an explicit centralized
+  server model.
+
+### Verification
+
+- Documentation-only architecture plan change.
+- No source code, secrets, OpenClaw files, or Metricon/Kickidler files were
+  modified.
+
+### Open Risks
+
+- Code still needs follow-up changes so non-owner device setup does not install
+  always-on API/bot services by default.
+- Need to add central server URL/client configuration once a client app or local
+  bridge is implemented.
+- Need to decide whether Bitrix can use one admin integration or requires
+  per-user OAuth.
+- Need to decide which Google/Gmail data requires per-user OAuth versus shared
+  company credentials.
+
 ## 2026-06-03 - VPN Plan Change To Tailscale
 
 ### User Request
