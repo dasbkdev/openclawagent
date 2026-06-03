@@ -216,6 +216,37 @@ the project is about, and that Nikolay's computer is always on.
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Fix Empty control-plane Folder In Root GitHub Repo
+
+### User Question
+
+The user saw that `control-plane` was empty on another device after pushing the
+root `agent` repository and asked why, since they had run `git add .` in the
+root folder.
+
+### Root Cause
+
+- `control-plane` had previously been its own nested git repository.
+- The root `agent` repository had staged it as a gitlink/submodule-like entry:
+  mode `160000`, pointing to commit `34bac68...`.
+- That means root `git add .` added a pointer to another repo, not the actual
+  files.
+- Because no usable submodule URL was configured for consumers, cloning the root
+  repo on another device produced an empty/broken `control-plane` folder.
+
+### Implemented
+
+- Removed the gitlink from the root repository index:
+  - `git rm --cached control-plane`
+- Added `control-plane` contents as normal tracked files in the root repo:
+  - `git add control-plane`
+- Confirmed staged diff now contains real `control-plane` files instead of only
+  the `160000` gitlink.
+
+### Status
+
+Ready to commit and push from the root `agent` repo.
+
 ## 2026-06-02 - Windows Install And Local Git Preparation
 
 ### User Request

@@ -1,0 +1,15 @@
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "anthropic/claude-sonnet-4-6",
+        "fallbacks": []
+      },
+      "models": {
+        "anthropic/claude-sonnet-4-6": {
+          "alias": "Sonnet"
+        }
+      }
+    }
+  }
+}

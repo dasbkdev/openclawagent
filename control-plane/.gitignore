@@ -1,0 +1,10 @@
+node_modules/
+data/
+dist/
+.env
+.env.*
+!.env.example
+secrets.json
+secrets.key
+runtime-config.json
+*.log

@@ -1,0 +1,102 @@
+import { Roles } from "../domain/roles.js";
+
+export function createInitialState(env = process.env) {
+  const ownerTelegramUserId = env.BOOTSTRAP_OWNER_TELEGRAM_ID || "dev-nikolay";
+  const now = new Date().toISOString();
+
+  return {
+    schemaVersion: 1,
+    users: [
+      {
+        id: "u-nikolay",
+        displayName: "Nikolay",
+        role: Roles.OWNER,
+        employeeId: "nikolay",
+        managerId: null,
+        kickidlerEmployeeId: 1,
+        projectIds: [],
+        telegram: {
+          telegramUserId: ownerTelegramUserId,
+          username: "nikolay",
+          linkedAt: now,
+        },
+      },
+      {
+        id: "u-maksat",
+        displayName: "Maksat",
+        role: Roles.SENIOR_PM,
+        employeeId: "maksat",
+        managerId: "u-nikolay",
+        kickidlerEmployeeId: 2,
+        projectIds: ["project-alpha", "project-beta", "project-gamma"],
+        telegram: null,
+      },
+      {
+        id: "u-pm-1",
+        displayName: "Project Manager 1",
+        role: Roles.PM,
+        employeeId: "pm-1",
+        managerId: "u-maksat",
+        kickidlerEmployeeId: 3,
+        projectIds: ["project-alpha"],
+        telegram: null,
+      },
+      {
+        id: "u-pm-2",
+        displayName: "Project Manager 2",
+        role: Roles.PM,
+        employeeId: "pm-2",
+        managerId: "u-maksat",
+        kickidlerEmployeeId: 4,
+        projectIds: ["project-beta"],
+        telegram: null,
+      },
+      {
+        id: "u-pm-3",
+        displayName: "Project Manager 3",
+        role: Roles.PM,
+        employeeId: "pm-3",
+        managerId: "u-maksat",
+        kickidlerEmployeeId: 5,
+        projectIds: ["project-gamma"],
+        telegram: null,
+      },
+    ],
+    projects: [
+      {
+        id: "project-alpha",
+        name: "Project Alpha",
+        bitrixGroupId: 101,
+        ownerUserId: "u-pm-1",
+        managerUserId: "u-maksat",
+        memberUserIds: ["u-pm-1"],
+      },
+      {
+        id: "project-beta",
+        name: "Project Beta",
+        bitrixGroupId: 102,
+        ownerUserId: "u-pm-2",
+        managerUserId: "u-maksat",
+        memberUserIds: ["u-pm-2"],
+      },
+      {
+        id: "project-gamma",
+        name: "Project Gamma",
+        bitrixGroupId: 103,
+        ownerUserId: "u-pm-3",
+        managerUserId: "u-maksat",
+        memberUserIds: ["u-pm-3"],
+      },
+    ],
+    inviteCodes: [],
+    tokenUsageEvents: [],
+    tokenReportSchedule: {
+      recipientTelegramId: env.TOKEN_USAGE_REPORT_TELEGRAM_ID || "984834133",
+      startedAt: now,
+      daily: { lastSentAt: null },
+      weekly: { lastSentAt: null },
+      monthly: { lastSentAt: null },
+    },
+    auditLog: [],
+  };
+}

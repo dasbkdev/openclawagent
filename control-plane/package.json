@@ -1,0 +1,15 @@
+{
+  "name": "company-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Company agent control plane for Telegram registration, hierarchy RBAC, audit, and read-only integrations.",
+  "scripts": {
+    "bot": "node src/telegram-bot.js",
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
