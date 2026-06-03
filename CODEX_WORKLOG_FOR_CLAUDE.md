@@ -104,6 +104,40 @@ Continue development. Add the next step and record all work in a file under
 
 Done. Ready for Claude review.
 
+## 2026-06-03 - Create Server Branch And Push Attempt
+
+### User Request
+
+Create a `server` branch and push the current Linux central server work there.
+
+### Result
+
+- Created local branch:
+  - `server`
+- Attempted SSH push to:
+  - `git@github.com:dasbkdev/openclawagent.git`
+- SSH push failed before upload:
+  - GitHub returned `Permission denied (publickey)`.
+- Attempted HTTPS push directly to:
+  - `https://github.com/dasbkdev/openclawagent.git`
+- HTTPS push timed out waiting for GitHub credential authorization.
+- Checked remote branch over HTTPS:
+  - `refs/heads/server` does not exist yet.
+
+### Diagnosis
+
+The local branch exists, but this machine currently cannot authenticate to
+GitHub for push. Need one of:
+
+- add this machine's SSH public key to GitHub; or
+- authorize Git Credential Manager for GitHub HTTPS; or
+- push manually from a machine that already has GitHub write access.
+
+### Notes
+
+- No secrets or server passwords were written to the repository.
+- No GitHub push succeeded yet.
+
 ## 2026-06-03 - Linux Central Server Support
 
 ### User Request
