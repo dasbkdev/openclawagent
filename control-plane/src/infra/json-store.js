@@ -3,8 +3,12 @@ import path from "node:path";
 
 const LOCK_RETRY_START_MS = 25;
 const LOCK_RETRY_MAX_MS = 250;
-const LOCK_ACQUIRE_TIMEOUT_MS = 5000;
-const LOCK_STALE_MS = 30000;
+// Some legacy mutators perform network reads while holding the lock
+// (reports fetch Platrum/Metricon inside store.update), so writers must
+// tolerate multi-second holds. Stale reaping must stay well above the
+// longest legitimate hold to avoid stealing a live lock mid-write.
+const LOCK_ACQUIRE_TIMEOUT_MS = Number(process.env.CONTROL_PLANE_LOCK_TIMEOUT_MS || 25000);
+const LOCK_STALE_MS = Number(process.env.CONTROL_PLANE_LOCK_STALE_MS || 120000);
 
 export class JsonStore {
   constructor(filePath, seedFactory) {

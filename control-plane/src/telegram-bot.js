@@ -38,6 +38,11 @@ const createMetriconClient = async () => {
 let offset = Number(process.env.TELEGRAM_UPDATE_OFFSET || 0) || undefined;
 let nextMissingTokenLogAt = 0;
 let commandsSyncedForToken = null;
+// Reporters take the state lock and may do network work; running them on
+// every poll iteration starves user-triggered writes. Once a minute is
+// plenty for daily schedules / token reports / memory summaries.
+const REPORTERS_INTERVAL_MS = Number(process.env.BOT_REPORTERS_INTERVAL_MS || 60000);
+let nextReportersRunAt = 0;
 
 console.log("telegram bot polling started");
 
@@ -61,30 +66,33 @@ while (true) {
       commandsSyncedForToken = telegramToken;
       console.log(`telegram command menu synchronized (${TELEGRAM_BOT_COMMANDS.length} commands)`);
     }
-    await sendDueTokenUsageReports({
-      store,
-      telegram,
-      recipientTelegramId: process.env.TOKEN_USAGE_REPORT_TELEGRAM_ID || "984834133",
-    });
-    try {
-      await runDueMemorySummaries({ store, claudeClient: createClaudeClientFromEnv() });
-      await store.update((state) => {
-        expireStaleAssistantLoops(state, { now: new Date() });
+    if (Date.now() >= nextReportersRunAt) {
+      nextReportersRunAt = Date.now() + REPORTERS_INTERVAL_MS;
+      await sendDueTokenUsageReports({
+        store,
+        telegram,
+        recipientTelegramId: process.env.TOKEN_USAGE_REPORT_TELEGRAM_ID || "984834133",
       });
-    } catch (error) {
-      console.error(
-        "memory maintenance failed:",
-        error instanceof Error ? error.message : error,
-      );
+      try {
+        await runDueMemorySummaries({ store, claudeClient: createClaudeClientFromEnv() });
+        await store.update((state) => {
+          expireStaleAssistantLoops(state, { now: new Date() });
+        });
+      } catch (error) {
+        console.error(
+          "memory maintenance failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+      await sendDueDailyAssistantMessages({
+        store,
+        telegram,
+        kickidlerClient: await createMetriconClient(),
+        bitrixClient: createBitrixClientFromEnv(),
+        platrumClient: createPlatrumClientFromEnv(),
+        googleOAuthService,
+      });
     }
-    await sendDueDailyAssistantMessages({
-      store,
-      telegram,
-      kickidlerClient: await createMetriconClient(),
-      bitrixClient: createBitrixClientFromEnv(),
-      platrumClient: createPlatrumClientFromEnv(),
-      googleOAuthService,
-    });
     const updates = await telegram.getUpdates({ offset, timeout: 25 });
     for (const update of updates) {
       // Advance the offset before processing so a "poison" update can

@@ -1698,10 +1698,27 @@ function formatTelegramError(error) {
       "Проверь /ai_status. Команды /bitrix, /report, /google_status и /agents работают отдельно от Claude.",
     ].join("\n");
   }
+  if (isAbortLikeError(error)) {
+    return [
+      title("Не успел собрать ответ"),
+      "Один из сервисов отвечал слишком долго, и запрос был прерван.",
+      "Попробуй задать вопрос ещё раз или сузить его (например, один сотрудник и один день).",
+    ].join("\n");
+  }
   return [
     title("Ошибка"),
     escapeHtml(error instanceof Error ? error.message : "Unknown error"),
   ].join("\n");
+}
+
+function isAbortLikeError(error) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return (
+    error.name === "AbortError" ||
+    /operation was aborted|aborted|timed? ?out/iu.test(error.message || "")
+  );
 }
 
 function helpText() {

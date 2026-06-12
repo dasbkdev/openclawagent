@@ -43,7 +43,7 @@ test("a stale lock file is reaped and the update proceeds", async () => {
   // Write a stale lock (mtime far in the past).
   const lockPath = `${filePath}.lock`;
   await fs.writeFile(lockPath, JSON.stringify({ pid: 999999, createdAt: "2000-01-01T00:00:00Z" }));
-  const oldTime = new Date(Date.now() - 60_000);
+  const oldTime = new Date(Date.now() - 10 * 60_000);
   await fs.utimes(lockPath, oldTime, oldTime);
 
   await store.update((state) => {

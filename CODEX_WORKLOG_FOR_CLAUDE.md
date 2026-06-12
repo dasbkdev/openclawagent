@@ -8434,3 +8434,43 @@ User confirmed PM2 = Aizirek. Production state updated (backup
 
 Verified live: Platrum 1 task, Bitrix 1 task (ДТМ, completed) flow for her.
 Audit event `user.mapping.manual_fix` recorded. No code changes.
+
+## 2026-06-12 - Hotfix: "This operation was aborted" on long summaries
+
+### Problem (user-reported)
+
+Free-form summary request for an employee returned "Ошибка / This operation
+was aborted". Server journal also showed
+"JsonStore: failed to acquire lock within 5000ms".
+
+Two root causes:
+
+1. Claude client timeout stayed at 30s while answers now request
+   maxTokens 3000 - long structured summaries get aborted mid-generation.
+2. Bot loop ran reporters (daily assistant / token usage / memory
+   summaries) on EVERY poll iteration; some legacy mutators do network
+   reads inside store.update, holding the cross-process file lock for many
+   seconds and starving user-triggered writes (5s acquire timeout).
+
+### Fix
+
+- Claude timeout: 120s default, `CLAUDE_TIMEOUT_MS` override
+  (claude-client.js factory).
+- Lock tuning: acquire timeout 5s -> 25s, stale reap 30s -> 120s,
+  env-overridable (`CONTROL_PLANE_LOCK_TIMEOUT_MS`,
+  `CONTROL_PLANE_LOCK_STALE_MS`); stale-lock test updated accordingly.
+- Bot loop throttle: reporters now run at most once per 60s
+  (`BOT_REPORTERS_INTERVAL_MS`), not every iteration.
+- Friendly Telegram error for abort/timeout instead of raw
+  "This operation was aborted" (handler.js `isAbortLikeError`).
+
+### Verification
+
+- Local + server `npm test`: 171 passed, 0 failed. Services active.
+
+### Known debt (next)
+
+- Proper fix for lock holds: two-phase refactor so reports fetch network
+  data BEFORE store.update and apply state changes in a short mutation
+  (daily-assistant-reporter, platrum/bitrix report paths). Tracked for the
+  Postgres migration milestone.

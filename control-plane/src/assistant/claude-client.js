@@ -6,7 +6,10 @@ export function createClaudeClientFromEnv(env = process.env) {
   if (!apiKey) {
     return new MissingClaudeClient({ model });
   }
-  return new HttpClaudeClient({ apiKey, model });
+  // Long structured answers (maxTokens 3000) can take well over 30s to
+  // generate; the old 30s default aborted them mid-flight.
+  const timeoutMs = Number(env.CLAUDE_TIMEOUT_MS || 120000);
+  return new HttpClaudeClient({ apiKey, model, timeoutMs });
 }
 
 export class MissingClaudeClient {
