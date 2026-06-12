@@ -101,6 +101,13 @@ export async function buildPlatrumUserStatusReport(state, { actor, request, plat
     platrumClient.getTeamMetrics(),
   ]);
 
+  // Persist a mapping discovered by name search so the next request
+  // does not need to resolve again (runs inside store.update).
+  if (!targetUser.platrumUserId && userTasksResult.platrumUserId) {
+    targetUser.platrumUserId = userTasksResult.platrumUserId;
+    targetUser.platrumUsername = targetUser.platrumUsername ?? userTasksResult.platrumUsername ?? null;
+  }
+
   const userTasks = userTasksResult.tasks.map(normalizeTaskForReport);
   const allProjectTasks = projectResults.flatMap((result) => result.ok ? result.tasks : []);
   // Personal stats must only count tasks assigned to the target user.

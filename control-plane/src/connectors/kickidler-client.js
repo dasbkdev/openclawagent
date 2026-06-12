@@ -49,6 +49,10 @@ export class MockKickidlerClient {
       }),
     };
   }
+
+  async listEmployees() {
+    return [];
+  }
 }
 
 export class HttpKickidlerClient {
@@ -118,6 +122,20 @@ export class HttpKickidlerClient {
 
   async fetchJson(url, options = {}) {
     return await this.requestJson(url, options);
+  }
+
+  /**
+   * List company employees visible to the service account (read-only).
+   * Used to auto-resolve `kickidlerEmployeeId` for new users by name.
+   */
+  async listEmployees() {
+    const payload = await this.requestJson("employees/available", { method: "GET" });
+    const list = unwrapMetriconData(payload);
+    return (Array.isArray(list) ? list : []).map((item) => ({
+      id: item.id ?? item.employeeId ?? null,
+      name: item.employeeName ?? item.name ?? null,
+      status: item.status ?? null,
+    }));
   }
 
   async requestJson(urlOrPath, options = {}) {

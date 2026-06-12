@@ -117,8 +117,40 @@ export class HttpBitrixClient {
     };
   }
 
+  /**
+   * Resolve the Bitrix user for a control-plane user. Uses the stored
+   * mapping when present; otherwise searches the company directory by
+   * name through the admin webhook (`user.search` is in the read-only
+   * allowlist). Ambiguous results return null - never guess identities.
+   */
+  async resolveBitrixUser(user) {
+    if (user?.bitrixUserId) {
+      return { id: Number(user.bitrixUserId), resolvedByName: false };
+    }
+    const tokens = buildBitrixSearchTokens(user);
+    for (const token of tokens) {
+      let found;
+      try {
+        found = await this.callMethod("user.search", { FILTER: { FIND: token } });
+      } catch {
+        continue;
+      }
+      const list = Array.isArray(found?.result) ? found.result : Array.isArray(found) ? found : [];
+      const active = list.filter((item) => item?.ID);
+      if (active.length === 1) {
+        return {
+          id: Number(active[0].ID),
+          name: [active[0].NAME, active[0].LAST_NAME].filter(Boolean).join(" ") || null,
+          resolvedByName: true,
+        };
+      }
+    }
+    return null;
+  }
+
   async getUserTasks({ user, limit = 20, includeClosed = true }) {
-    if (!user.bitrixUserId) {
+    const resolved = await this.resolveBitrixUser(user);
+    if (!resolved?.id) {
       return {
         source: this.source,
         configured: this.configured,
@@ -129,7 +161,7 @@ export class HttpBitrixClient {
       };
     }
 
-    const filter = { RESPONSIBLE_ID: user.bitrixUserId };
+    const filter = { RESPONSIBLE_ID: resolved.id };
     if (!includeClosed) {
       filter["!STATUS"] = 5;
     }
@@ -157,7 +189,8 @@ export class HttpBitrixClient {
       source: this.source,
       configured: this.configured,
       userId: user.id,
-      bitrixUserId: user.bitrixUserId,
+      bitrixUserId: resolved.id,
+      bitrixResolvedByName: Boolean(resolved.resolvedByName),
       tasks: readTasks(payload).slice(0, limit).map(normalizeBitrixTask),
     };
   }
@@ -282,4 +315,17 @@ function buildMockTasks(project, limit) {
     closedAt: status === 5 ? new Date(now - 2 * 60 * 60 * 1000).toISOString() : null,
     url: null,
   }));
+}
+
+function buildBitrixSearchTokens(user) {
+  const telegramFullName = [user?.telegram?.firstName, user?.telegram?.lastName]
+    .filter(Boolean)
+    .join(" ");
+  return [
+    user?.displayName,
+    telegramFullName,
+    user?.telegram?.firstName,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value.length >= 3 && !/^(project manager|pm)\s*\d+$/iu.test(value));
 }

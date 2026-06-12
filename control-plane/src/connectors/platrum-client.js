@@ -295,8 +295,8 @@ export class HttpPlatrumClient {
       return { id: Number(user.platrumUserId), username: user.platrumUsername ?? null };
     }
     const users = await this.getUsers();
-    const candidates = buildUserCandidateTokens(user);
-    return users.find((candidate) => {
+    const tokens = buildUserCandidateTokens(user);
+    const matches = users.filter((candidate) => {
       const values = [
         candidate.id,
         candidate.username,
@@ -304,9 +304,11 @@ export class HttpPlatrumClient {
         candidate.full_name,
         candidate.first_name,
         candidate.last_name,
-      ].map(normalizeSearch);
-      return candidates.some((token) => values.includes(token));
-    }) || null;
+      ];
+      return tokens.some((token) => values.some((value) => userTokenMatchesValue(token, value)));
+    });
+    // Ambiguous matches must not silently map to the wrong person.
+    return matches.length === 1 ? matches[0] : null;
   }
 
   async requestJson(path, { method = "GET", query = {}, body = undefined, auth = true, retry = true } = {}) {
@@ -528,14 +530,40 @@ function normalizeTaskStatus(status, label, columnOrder) {
 }
 
 function buildUserCandidateTokens(user) {
+  const telegramFullName = [user?.telegram?.firstName, user?.telegram?.lastName]
+    .filter(Boolean)
+    .join(" ");
   return [
     user?.platrumUsername,
     user?.email,
     user?.displayName,
     user?.employeeId,
     user?.telegram?.username,
+    user?.telegram?.firstName,
+    user?.telegram?.lastName,
+    telegramFullName,
     user?.id,
-  ].map(normalizeSearch).filter(Boolean);
+  ].map(normalizeSearch).filter((token) => token && token.length >= 3);
+}
+
+/**
+ * A candidate token matches a directory value when it equals the whole
+ * normalized value or one of its words (so "Перизат" finds
+ * "Усенкулова Перизат"). Word-level matching only applies to tokens of
+ * 4+ characters to avoid false positives on short fragments.
+ */
+export function userTokenMatchesValue(token, value) {
+  const normalizedValue = normalizeSearch(value);
+  if (!token || !normalizedValue) {
+    return false;
+  }
+  if (normalizedValue === token) {
+    return true;
+  }
+  if (token.length < 4) {
+    return false;
+  }
+  return normalizedValue.split(/[\s/.,_-]+/u).includes(token);
 }
 
 function asArray(payload) {

@@ -152,6 +152,9 @@ test("Bitrix client skips user task lookup when user mapping is missing", async 
   });
 
   const client = new HttpBitrixClient({ webhookUrl: "https://example.bitrix24.ru/rest/1/token" });
+  // Placeholder names give no usable search tokens, so no network call
+  // happens; users with real names are auto-resolved via user.search
+  // (covered in external-mapping.test.js).
   const result = await client.getUserTasks({
     user: { id: "u-pm-2", displayName: "PM 2", bitrixUserId: null },
   });

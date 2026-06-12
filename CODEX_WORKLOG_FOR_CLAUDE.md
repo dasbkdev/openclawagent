@@ -8371,3 +8371,51 @@ Regression tests added (platrum.test.js, daily-assistant.test.js updated).
 2. Decide Metricon mapping for u-pm-2/u-pm-3; add Maksat to Metricon if
    his activity should be tracked.
 3. Rotate server root password (SSH key now available).
+
+## 2026-06-12 - Auto-resolve employee mappings (Perizat case)
+
+### Problem (user-reported)
+
+Perizat (last PM) registered via Telegram; the assistant told her a manager
+must add her to Platrum and Bitrix, although she exists in both (30 tasks in
+her Bitrix kanban). Cause: control-plane user u-pm-3 had placeholder
+displayName "Project Manager 3" and null platrum/bitrix/metricon mappings;
+connectors bail out when the mapping is missing.
+
+### Production data fix (immediate)
+
+State backup `control-plane.json.pm3-fix-backup-*`, then u-pm-3 set to:
+displayName "Перизат Усенкулова", platrumUserId 19 (jesus), bitrixUserId 15,
+kickidlerEmployeeId 76 - all resolved live through the company-wide service
+accounts. Verified: Platrum returns 1 task, Bitrix returns 30 tasks.
+
+### Systemic fix (code)
+
+- `bitrix-client.js`: new `resolveBitrixUser` - when bitrixUserId is
+  missing, searches the company directory via `user.search` (admin webhook,
+  read-only allowlist) by display/telegram name; only unambiguous (single)
+  matches are used; `getUserTasks` now resolves instead of bailing.
+- `platrum-client.js`: candidate tokens now include telegram
+  firstName/lastName; matching upgraded to word-level
+  (`userTokenMatchesValue`, "Перизат" matches "Усенкулова Перизат") with an
+  ambiguity guard (multiple matches -> null, never guess).
+- `kickidler-client.js`: new `listEmployees()` (GET employees/available).
+- New `src/domain/external-mapping.js`: `autoResolveUserMappings` resolves
+  Platrum + Bitrix + Metricon IDs by name and persists them (audit event
+  `user.mapping.autoresolved`); network calls run outside the state lock;
+  existing mappings never overwritten; placeholder names skipped.
+- `/register` flow: stores telegram first/last name, replaces placeholder
+  displayName with the real name, then auto-resolves all three systems and
+  tells the user which systems were found.
+- Lazy healing: `buildPlatrumUserStatusReport` and the assistant context
+  persist IDs discovered on the fly, so legacy users heal on first use.
+- USER_ALIASES: "перизат"/"perizat"/"усенкулова" for u-pm-3.
+
+### Verification
+
+- Local and server `npm test`: **171 passed, 0 failed** (+6 new tests:
+  token matching, metricon matcher ambiguity, autoResolve persist/fault
+  tolerance, bitrix name resolution, register name storage).
+- Services restarted, active, /health ok, journal clean.
+- Bitrix test "skips lookup when mapping missing" updated: placeholder
+  names produce no search tokens (no network); real names auto-resolve.

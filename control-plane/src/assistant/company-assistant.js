@@ -30,7 +30,7 @@ const USER_ALIASES = Object.freeze({
   "u-maksat": ["максат", "максата", "максату", "maksat"],
   "u-pm-1": ["бегайым", "бегайым пм", "begayym", "begoim", "project manager 1", "pm1", "пм1"],
   "u-pm-2": ["project manager 2", "pm2", "пм2"],
-  "u-pm-3": ["project manager 3", "pm3", "пм3"],
+  "u-pm-3": ["project manager 3", "pm3", "пм3", "перизат", "perizat", "усенкулова"],
 });
 
 export async function answerCompanyAssistant({
@@ -78,6 +78,7 @@ export async function answerCompanyAssistant({
   });
 
   const evicted = await store.update((currentState) => {
+    persistDiscoveredExternalIds(currentState, context);
     appendAuditEvent(currentState, {
       actorUserId: actor.id,
       actorTelegramUserId: actor.telegram?.telegramUserId,
@@ -564,6 +565,33 @@ function stripRawTask(task) {
   const { raw, ...rest } = task;
   void raw;
   return rest;
+}
+
+/**
+ * Persist external IDs discovered by name search during context reads
+ * (Platrum/Bitrix resolve users on the fly when the mapping is missing).
+ * Runs inside store.update so the healed mapping is saved for next time.
+ */
+function persistDiscoveredExternalIds(state, context) {
+  for (const entry of context.platrum?.userTasks || []) {
+    if (!entry?.user?.id || !entry.platrumUserId) {
+      continue;
+    }
+    const user = state.users.find((item) => item.id === entry.user.id);
+    if (user && (user.platrumUserId === null || user.platrumUserId === undefined)) {
+      user.platrumUserId = entry.platrumUserId;
+      user.platrumUsername = user.platrumUsername ?? entry.platrumUsername ?? null;
+    }
+  }
+  for (const entry of context.bitrixUserTasks || []) {
+    if (!entry?.user?.id || !entry.bitrixUserId) {
+      continue;
+    }
+    const user = state.users.find((item) => item.id === entry.user.id);
+    if (user && (user.bitrixUserId === null || user.bitrixUserId === undefined)) {
+      user.bitrixUserId = entry.bitrixUserId;
+    }
+  }
 }
 
 async function readPlatrumContext({ projects, targetUsers, period, platrumClient }) {

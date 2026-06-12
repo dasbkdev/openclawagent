@@ -30,6 +30,7 @@ import {
   redeemInviteCode,
   reissueInviteCode,
 } from "../domain/invite-codes.js";
+import { autoResolveUserMappings } from "../domain/external-mapping.js";
 import {
   formatNaturalDeviceCommandQueued,
   tryCreateNaturalDeviceCommand,
@@ -60,6 +61,8 @@ export async function handleTelegramMessage({
   const chatId = message?.chat?.id;
   const telegramUserId = message?.from?.id;
   const username = message?.from?.username;
+  const firstName = message?.from?.first_name;
+  const lastName = message?.from?.last_name;
   const voice = message?.voice;
   let command = parseTelegramCommand(message?.text);
   let voiceReplyRequested = Boolean(voiceService?.wantsVoiceReply(command.raw));
@@ -98,7 +101,19 @@ export async function handleTelegramMessage({
         return;
 
       case "register":
-        await registerTelegramUser({ store, telegram, chatId, telegramUserId, username, code: command.args[0] });
+        await registerTelegramUser({
+          store,
+          telegram,
+          chatId,
+          telegramUserId,
+          username,
+          firstName,
+          lastName,
+          code: command.args[0],
+          platrumClient,
+          bitrixClient,
+          kickidlerClient,
+        });
         return;
 
       case "invite":
@@ -455,12 +470,26 @@ export async function processTelegramUpdate({ update, store, telegram, googleOAu
   }
 }
 
-async function registerTelegramUser({ store, telegram, chatId, telegramUserId, username, code }) {
+async function registerTelegramUser({
+  store,
+  telegram,
+  chatId,
+  telegramUserId,
+  username,
+  firstName,
+  lastName,
+  code,
+  platrumClient,
+  bitrixClient,
+  kickidlerClient,
+}) {
   const result = await store.update((state) => {
     const redeemed = redeemInviteCode(state, {
       code,
       telegramUserId,
       username,
+      firstName,
+      lastName,
     });
     appendAuditEvent(state, {
       actorUserId: redeemed.user.id,
@@ -471,12 +500,36 @@ async function registerTelegramUser({ store, telegram, chatId, telegramUserId, u
     return publicUser(redeemed.user);
   });
 
+  // Auto-resolve Platrum/Bitrix/Metricon IDs by name through the
+  // company-wide service accounts so the new employee's data works
+  // immediately, without manual mapping.
+  let mappingNote = null;
+  try {
+    const resolved = await autoResolveUserMappings({
+      store,
+      userId: result.id,
+      platrumClient,
+      bitrixClient,
+      kickidlerClient,
+    });
+    const found = [];
+    if (resolved.updated.platrumUserId) found.push("Platrum");
+    if (resolved.updated.bitrixUserId) found.push("Bitrix");
+    if (resolved.updated.kickidlerEmployeeId) found.push("Metricon");
+    if (found.length > 0) {
+      mappingNote = `Нашел тебя в системах: ${found.join(", ")}.`;
+    }
+  } catch (error) {
+    console.error(`auto mapping after register failed: ${error instanceof Error ? error.message : error}`);
+  }
+
   await telegram.sendMessage({
     chatId,
     text: [
       title("Регистрация завершена"),
       kv("Сотрудник", result.displayName),
       kv("Роль", formatRole(result.role)),
+      ...(mappingNote ? ["", mappingNote] : []),
       "",
       "Теперь подключи Google, если это еще не сделано:",
       codeLine("/google_connect"),

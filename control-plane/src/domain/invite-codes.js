@@ -129,7 +129,7 @@ function resolveUniqueInviteCode(state, requestedCode) {
   throw validation("Could not generate unique invite code");
 }
 
-export function redeemInviteCode(state, { code, telegramUserId, username = undefined }) {
+export function redeemInviteCode(state, { code, telegramUserId, username = undefined, firstName = undefined, lastName = undefined }) {
   const normalizedCode = normalizeInviteCode(code);
   const normalizedTelegramId = normalizeTelegramUserId(telegramUserId);
   const codeHash = hashInviteCode(normalizedCode);
@@ -162,8 +162,18 @@ export function redeemInviteCode(state, { code, telegramUserId, username = undef
   user.telegram = {
     telegramUserId: normalizedTelegramId,
     username: typeof username === "string" && username.trim() ? username.trim() : null,
+    firstName: typeof firstName === "string" && firstName.trim() ? firstName.trim() : null,
+    lastName: typeof lastName === "string" && lastName.trim() ? lastName.trim() : null,
     linkedAt: now.toISOString(),
   };
+
+  // Placeholder display names (e.g. "Project Manager 3") are replaced by
+  // the real Telegram name so directory auto-resolution can match the
+  // employee in Platrum/Bitrix/Metricon.
+  const realName = [user.telegram.firstName, user.telegram.lastName].filter(Boolean).join(" ");
+  if (realName && /^project manager \d+$/iu.test(String(user.displayName || ""))) {
+    user.displayName = realName;
+  }
 
   invite.usedAt = now.toISOString();
   invite.usedByTelegramUserId = normalizedTelegramId;
