@@ -25,6 +25,10 @@ export class TelegramBotApi {
     });
   }
 
+  async getMe() {
+    return await this.call("getMe", {});
+  }
+
   async getFile({ fileId }) {
     return await this.call("getFile", {
       file_id: fileId,

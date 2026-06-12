@@ -103,7 +103,15 @@ export async function buildPlatrumUserStatusReport(state, { actor, request, plat
 
   const userTasks = userTasksResult.tasks.map(normalizeTaskForReport);
   const allProjectTasks = projectResults.flatMap((result) => result.ok ? result.tasks : []);
-  const combinedTasks = dedupeTasks([...userTasks, ...allProjectTasks]);
+  // Personal stats must only count tasks assigned to the target user.
+  // Project boards contain tasks of every member; mixing them in skews
+  // the employee KPI with other people's tasks.
+  const assigneeIdentity = {
+    platrumUserId: userTasksResult.platrumUserId ?? targetUser.platrumUserId ?? null,
+    platrumUsername: userTasksResult.platrumUsername ?? targetUser.platrumUsername ?? null,
+  };
+  const assignedProjectTasks = allProjectTasks.filter((task) => taskAssignedToUser(task, assigneeIdentity));
+  const combinedTasks = dedupeTasks([...userTasks, ...assignedProjectTasks]);
   const dailyReports = filterDailyReportsForUser(dailyReportsResult.reports, userTasksResult, targetUser);
   const analytics = buildEmployeeKpi({
     user: targetUser,
@@ -134,6 +142,7 @@ export async function buildPlatrumUserStatusReport(state, { actor, request, plat
       configured: userTasksResult.configured,
       userTasks: userTasks.length,
       projectTasks: allProjectTasks.length,
+      assignedProjectTasks: assignedProjectTasks.length,
       combinedTasks: combinedTasks.length,
       readOnly: true,
       efficiencyPercent: analytics.efficiencyPercent,
@@ -164,6 +173,20 @@ export async function buildPlatrumUserStatusReport(state, { actor, request, plat
     analytics,
     snapshot,
   };
+}
+
+export function taskAssignedToUser(task, { platrumUserId, platrumUsername } = {}) {
+  const idMatch =
+    platrumUserId !== null &&
+    platrumUserId !== undefined &&
+    task.assigneeId !== null &&
+    task.assigneeId !== undefined &&
+    String(task.assigneeId) === String(platrumUserId);
+  const usernameMatch =
+    Boolean(platrumUsername) &&
+    Boolean(task.assigneeUsername) &&
+    String(task.assigneeUsername).toLowerCase() === String(platrumUsername).toLowerCase();
+  return idMatch || usernameMatch;
 }
 
 export function summarizePlatrumTasks(tasks) {

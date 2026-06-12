@@ -70,9 +70,12 @@ export async function answerCompanyAssistant({
   const completion = await claudeClient.complete({
     system: buildSystemPrompt(),
     user: buildUserPrompt({ question: trimmedQuestion, context }),
+    maxTokens: 3000,
   });
 
-  const rendered = renderAssistantCompletion(completion.text);
+  const rendered = renderAssistantCompletion(completion.text, {
+    truncated: completion.stopReason === "max_tokens",
+  });
 
   const evicted = await store.update((currentState) => {
     appendAuditEvent(currentState, {
@@ -170,8 +173,9 @@ export async function answerCompanyAssistant({
  * Falls back to markdown-to-HTML conversion of the raw text if the
  * response is not valid JSON in the expected shape.
  */
-function renderAssistantCompletion(answerText) {
+export function renderAssistantCompletion(answerText, { truncated = false } = {}) {
   const raw = String(answerText ?? "");
+  const truncatedNote = truncated ? "\n\n⚠️ Ответ был сокращён из-за лимита длины." : "";
   const parsed = parseStructuredAnswer(raw);
   if (parsed) {
     const blocks = [];
@@ -211,14 +215,26 @@ function renderAssistantCompletion(answerText) {
     }
 
     return {
-      html: renderBlocks(blocks),
-      plainText: plainLines.join("\n").trim(),
+      html: renderBlocks(blocks) + (truncated ? markdownToTelegramHtml(truncatedNote) : ""),
+      plainText: (plainLines.join("\n").trim() + truncatedNote).trim(),
+    };
+  }
+
+  // The answer is not parseable JSON. If it still looks like our JSON
+  // format (e.g. truncated mid-string by the token limit), raw JSON must
+  // never reach the user: salvage the readable string values instead.
+  if (looksLikeStructuredJson(raw)) {
+    const salvagedText = salvageStructuredText(raw);
+    const fallback = salvagedText || "Не удалось сформировать ответ полностью. Попробуй переспросить или сузить вопрос.";
+    return {
+      html: markdownToTelegramHtml(fallback + truncatedNote),
+      plainText: (fallback + truncatedNote).trim(),
     };
   }
 
   return {
-    html: markdownToTelegramHtml(raw),
-    plainText: raw,
+    html: markdownToTelegramHtml(raw + truncatedNote),
+    plainText: (raw + truncatedNote).trim(),
   };
 }
 
@@ -230,24 +246,127 @@ function renderAssistantCompletion(answerText) {
  */
 function parseStructuredAnswer(text) {
   const start = text.indexOf("{");
+  if (start === -1) {
+    return null;
+  }
+
+  const candidates = [];
   const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    return null;
+  if (end > start) {
+    candidates.push(text.slice(start, end + 1));
   }
-  const candidate = text.slice(start, end + 1);
-  let value;
-  try {
-    value = JSON.parse(candidate);
-  } catch {
-    return null;
+  // The model reply may be cut off mid-string by the token limit; try to
+  // repair the fragment from the first `{` to the end of the text.
+  candidates.push(...repairTruncatedJsonCandidates(text.slice(start)));
+
+  for (const candidate of candidates) {
+    let value;
+    try {
+      value = JSON.parse(candidate);
+    } catch {
+      continue;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      continue;
+    }
+    if (typeof value.title !== "string" && !Array.isArray(value.sections)) {
+      continue;
+    }
+    return value;
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
+  return null;
+}
+
+/**
+ * Build progressively more aggressive repaired variants of a truncated
+ * JSON fragment: close an unterminated string, drop dangling separators
+ * or a dangling key, then close all open brackets.
+ */
+function repairTruncatedJsonCandidates(fragment) {
+  let inString = false;
+  let escaped = false;
+  const stack = [];
+  for (const ch of fragment) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      stack.push("}");
+    } else if (ch === "[") {
+      stack.push("]");
+    } else if (ch === "}" || ch === "]") {
+      if (stack.length > 0 && stack[stack.length - 1] === ch) {
+        stack.pop();
+      }
+    }
   }
-  if (typeof value.title !== "string" && !Array.isArray(value.sections)) {
-    return null;
+
+  let base = fragment;
+  if (escaped) {
+    base = base.slice(0, -1);
   }
-  return value;
+  if (inString) {
+    base += '"';
+  }
+  const closers = stack.slice().reverse().join("");
+
+  const candidates = [base + closers];
+  const noSeparator = base.replace(/\s*[,:]\s*$/u, "");
+  if (noSeparator !== base) {
+    candidates.push(noSeparator + closers);
+  }
+  const noDanglingKey = noSeparator.replace(/,\s*"(?:[^"\\]|\\.)*"\s*$/u, "");
+  if (noDanglingKey !== noSeparator) {
+    candidates.push(noDanglingKey + closers);
+  }
+  return candidates;
+}
+
+function looksLikeStructuredJson(text) {
+  const trimmed = String(text || "").trim();
+  return trimmed.startsWith("{") && /"(title|sections|heading|lines|next_steps)"/u.test(trimmed);
+}
+
+/**
+ * Last-resort extraction of readable content from broken structured
+ * JSON: pull string values in order, skipping format keys, so the user
+ * gets plain readable lines instead of raw JSON syntax.
+ */
+function salvageStructuredText(text) {
+  const keys = new Set(["title", "sections", "heading", "lines", "next_steps"]);
+  const out = [];
+  const stringPattern = /"((?:[^"\\]|\\.)*)"(\s*:)?/gu;
+  let match;
+  while ((match = stringPattern.exec(text)) !== null) {
+    if (match[2]) {
+      continue;
+    }
+    let value;
+    try {
+      value = JSON.parse(`"${match[1]}"`);
+    } catch {
+      value = match[1];
+    }
+    const cleaned = String(value).trim();
+    if (cleaned.length > 0 && !keys.has(cleaned)) {
+      out.push(cleaned);
+    }
+  }
+  // Include a readable tail cut off before its closing quote.
+  const tail = text.match(/"((?:[^"\\]|\\.){8,})$/u);
+  if (tail) {
+    out.push(`${tail[1].trim()}…`);
+  }
+  return out.join("\n").trim();
 }
 
 async function archiveEvictedEvents(store, evicted) {
@@ -441,6 +560,12 @@ async function readMetriconContext({ targetUsers, period, kickidlerClient }) {
   }
 }
 
+function stripRawTask(task) {
+  const { raw, ...rest } = task;
+  void raw;
+  return rest;
+}
+
 async function readPlatrumContext({ projects, targetUsers, period, platrumClient }) {
   if (!platrumClient) {
     return {
@@ -457,7 +582,7 @@ async function readPlatrumContext({ projects, targetUsers, period, platrumClient
   for (const user of targetUsers) {
     try {
       const result = await platrumClient.getUserTasks({ user, limit: MAX_TASKS_PER_PROJECT, period });
-      const tasks = result.tasks.map((task) => ({ ...task, overdue: Boolean(task.overdue) }));
+      const tasks = result.tasks.map((task) => stripRawTask({ ...task, overdue: Boolean(task.overdue) }));
       userTasks.push({
         source: result.source,
         configured: result.configured,
@@ -490,11 +615,12 @@ async function readPlatrumContext({ projects, targetUsers, period, platrumClient
         platrumClient.getProjectTasks({ project, limit: MAX_TASKS_PER_PROJECT }),
         platrumClient.getProjectReport({ project }),
       ]);
-      const tasks = tasksResult.tasks.map((task) => ({ ...task, overdue: Boolean(task.overdue) }));
+      const tasks = tasksResult.tasks.map((task) => stripRawTask({ ...task, overdue: Boolean(task.overdue) }));
       projectTasks.push({
         source: tasksResult.source,
         configured: tasksResult.configured,
         readOnly: true,
+        tasksScope: "all_project_members",
         project: publicProject(project),
         platrumProjectId: tasksResult.platrumProjectId ?? project.platrumProjectId ?? null,
         note: tasksResult.note ?? reportResult.note ?? null,
@@ -893,7 +1019,10 @@ function buildSystemPrompt() {
     "Релевантные старые события (context.memory.relatedEvents) — подобранные по теме вопроса записи журнала (source=journal) и архива (source=archive). Используй их для непрерывности.",
     "Недавние события (context.memory.recentEvents) — последние реплики диалога для краткосрочной непрерывности. If user says 'не открылось', 'то же самое', 'оставшиеся', resolve it from recentEvents, openLoops and recentDeviceCommands.",
     "Use context.recentDeviceCommands to understand whether a local desktop action was queued, claimed, succeeded, failed or expired.",
-    "Эффективность по задачам считай как completed / total * 100, если есть задачи.",
+    "ВАЖНО про атрибуцию задач: platrum.projectTasks содержит задачи ВСЕХ участников проекта, у каждой задачи есть исполнитель (assigneeUsername/assigneeId).",
+    "Личные задачи, личная статистика и эффективность сотрудника считаются ТОЛЬКО по задачам, где этот сотрудник является исполнителем: platrum.userTasks либо задачи проекта с совпадающим assignee (сравни с platrumUserId/platrumUsername из userTasks).",
+    "НИКОГДА не приписывай сотруднику задачи с другим исполнителем и не считай из них его эффективность. Если у сотрудника ноль личных задач, прямо скажи об этом; задачи проекта с другими исполнителями упоминай отдельно, называя исполнителя.",
+    "Эффективность по задачам считай как completed / total * 100 только из задач, где сотрудник — исполнитель.",
     "Не упоминай системные токены, секреты, внутренние webhook-и или пароли.",
     "Never claim that you sent, queued, executed or completed a local device command. Real desktop actions are handled by the server before Claude is called.",
     "Пиши для Telegram: короткий заголовок, затем понятные секции; без Markdown-таблиц, JSON, сырого debug-контекста и непонятных символов.",

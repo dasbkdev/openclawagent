@@ -36,6 +36,7 @@ import {
 } from "../domain/natural-device-actions.js";
 import { recordAssistantMemoryEvent } from "../domain/assistant-memory.js";
 import { listAccessibleUserIds, publicProject, publicUser } from "../domain/policy.js";
+import { buildIntegrationsHealth } from "../domain/integration-health.js";
 import { buildKickidlerActivitySummary } from "../domain/reports.js";
 import { appendAuditEvent } from "../infra/audit.js";
 import { VoiceServiceError } from "../integrations/voice-service.js";
@@ -308,6 +309,21 @@ export async function handleTelegramMessage({
           chatId,
           telegramUserId,
           claudeClient,
+        });
+        return;
+
+      case "status":
+        await sendIntegrationsStatus({
+          store,
+          telegram,
+          chatId,
+          telegramUserId,
+          claudeClient,
+          kickidlerClient,
+          platrumClient,
+          bitrixClient,
+          voiceService,
+          googleOAuthService,
         });
         return;
 
@@ -950,6 +966,34 @@ async function sendAiStatus({ store, telegram, chatId, telegramUserId, claudeCli
   await telegram.sendMessage({ chatId, text: formatAiStatus(status) });
 }
 
+async function sendIntegrationsStatus({
+  store,
+  telegram,
+  chatId,
+  telegramUserId,
+  claudeClient,
+  kickidlerClient,
+  platrumClient,
+  bitrixClient,
+  voiceService,
+  googleOAuthService,
+}) {
+  const actor = await withActor(store, telegramUserId, async (_state, resolved) => resolved);
+  if (actor.role !== "OWNER") {
+    throw unauthorized("Команда /status доступна только владельцу.");
+  }
+  const health = await buildIntegrationsHealth({
+    claudeClient,
+    telegramApi: telegram,
+    kickidlerClient,
+    platrumClient,
+    bitrixClient,
+    voiceService,
+    googleOAuthService,
+  });
+  await telegram.sendMessage({ chatId, text: formatIntegrationsStatus(health) });
+}
+
 async function sendGoogleConnect({ store, telegram, chatId, telegramUserId, googleOAuthService }) {
   assertGoogleOAuthService(googleOAuthService);
   const state = await store.load();
@@ -1564,6 +1608,30 @@ function formatAiStatus(status) {
     "",
     "Пока это не исправлено, /bitrix, /report, /google_status и /agents работают отдельно от Claude.",
   );
+  return lines.join("\n");
+}
+
+const INTEGRATION_LABELS = {
+  claude: "Claude",
+  telegram: "Telegram",
+  metricon: "Metricon",
+  platrum: "Platrum",
+  bitrix: "Bitrix",
+  voice: "Голос",
+  google: "Google",
+};
+
+function formatIntegrationsStatus(health) {
+  const lines = [title("Статус интеграций")];
+  for (const [key, label] of Object.entries(INTEGRATION_LABELS)) {
+    const status = health.integrations?.[key];
+    if (!status) {
+      continue;
+    }
+    const icon = status.ok ? "✅" : "❌";
+    lines.push(`${icon} ${label}: ${escapeHtml(status.message || (status.ok ? "ok" : "недоступно"))}`);
+  }
+  lines.push("", kv("Проверено", formatDateTime(health.checkedAt)));
   return lines.join("\n");
 }
 

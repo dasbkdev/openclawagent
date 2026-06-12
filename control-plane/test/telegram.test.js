@@ -48,6 +48,7 @@ test("Telegram command menu exposes only useful product commands", () => {
     "google_status",
     "tokens",
     "ai_status",
+    "status",
   ]);
   assert.equal(commandNames.includes("tools"), false);
   assert.equal(commandNames.includes("between"), false);

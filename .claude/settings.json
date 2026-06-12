@@ -2,11 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(npm test:*)",
-      "Bash(node --check:*)",
-      "Bash(node --test:*)",
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)"
+      "Bash(npm:*)",
+      "Bash(node:*)",
+      "Bash(git:*)",
+      "Bash(grep:*)",
+      "Bash(sed:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "PowerShell(*)",
+      "Bash(*)"
     ],
     "deny": [
       "Read(**/secrets.json)",

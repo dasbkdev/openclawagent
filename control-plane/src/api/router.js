@@ -44,7 +44,8 @@ import {
   publicProject,
   publicUser,
 } from "../domain/policy.js";
-import { notFound, unauthorized, validation } from "../domain/errors.js";
+import { forbidden, notFound, unauthorized, validation } from "../domain/errors.js";
+import { buildIntegrationsHealth } from "../domain/integration-health.js";
 import { renderSetupPage } from "../setup/setup-page.js";
 import { renderDownloadPage, renderPrivacyPage, renderTermsPage } from "../setup/download-page.js";
 import { sendDueDailyAssistantMessages } from "../telegram/daily-assistant-reporter.js";
@@ -74,6 +75,8 @@ export function createRouter({
   return async function route(request, response) {
     try {
       const url = new URL(request.url, "http://127.0.0.1");
+
+      assertInternalApiToken(request, url);
 
       if (request.method === "GET" && url.pathname === "/health") {
         sendJson(response, 200, { ok: true, service: "company-control-plane" });
@@ -859,6 +862,29 @@ export function createRouter({
         return;
       }
 
+      if (request.method === "GET" && url.pathname === "/api/v1/health/integrations") {
+        const state = await store.load();
+        try {
+          assertAutomationToken(request);
+        } catch {
+          const actor = requireActor(state, request);
+          if (actor.role !== "OWNER") {
+            throw forbidden("Only OWNER can read integrations health");
+          }
+        }
+        const data = await buildIntegrationsHealth({
+          claudeClient: resolveClaudeClient(),
+          telegramApi: resolveTelegramApi(),
+          kickidlerClient: await resolveKickidlerClient(),
+          platrumClient: resolvePlatrumClient(),
+          bitrixClient: resolveBitrixClient(),
+          voiceService: resolveVoiceService(),
+          googleOAuthService,
+        });
+        sendJson(response, 200, { ok: true, data });
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/api/v1/audit-log") {
         const state = await store.load();
         const actor = requireActor(state, request);
@@ -1028,6 +1054,43 @@ function readPublicBaseUrl(request, env = process.env) {
 
 function firstHeader(value) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+const INTERNAL_API_TOKEN_EXEMPT_PREFIXES = [
+  "/api/v1/google/oauth/callback",
+  "/api/v1/google/oauth/start",
+  "/api/v1/device-agents/",
+  "/api/v1/automation/",
+  "/api/v1/setup/",
+  "/api/v1/health/integrations",
+  // Publicly proxied through nginx for desktop agents; authenticates with
+  // its own device token inside the handler.
+  "/api/v1/local-agent/",
+];
+
+/**
+ * If INTERNAL_API_TOKEN is configured, all /api/v1/* requests must carry a
+ * matching X-Internal-Token header, except for routes that already have
+ * their own authentication (device token, automation token, OAuth public
+ * flow, local setup wizard) or are public health checks.
+ *
+ * When INTERNAL_API_TOKEN is not set, this is a no-op (existing behavior).
+ */
+function assertInternalApiToken(request, url, env = process.env) {
+  const expected = env.INTERNAL_API_TOKEN;
+  if (!expected) {
+    return;
+  }
+  if (!url.pathname.startsWith("/api/v1/")) {
+    return;
+  }
+  if (INTERNAL_API_TOKEN_EXEMPT_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+    return;
+  }
+  const supplied = firstHeader(request.headers["x-internal-token"]);
+  if (!supplied || supplied !== expected) {
+    throw unauthorized("Invalid internal API token");
+  }
 }
 
 function assertAutomationToken(request, env = process.env) {

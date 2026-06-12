@@ -806,7 +806,13 @@ async function readMetriconUser({ user, period, kickidlerClient }) {
 
 function calculateDailyMetrics({ user, date, plan, bitrix, bitrixUserTasks, metricon, blockers }) {
   const planItems = plan?.items || [];
-  const projectBitrixTasks = bitrix.flatMap((project) => project.tasks);
+  // Project boards contain tasks of every member. Personal daily metrics
+  // must only count tasks assigned to this user; other members' tasks
+  // would skew completed/overdue counts (reported bug: Maksat's task was
+  // attributed to Begayym).
+  const projectBitrixTasks = bitrix
+    .flatMap((project) => project.tasks)
+    .filter((task) => taskBelongsToUser(task, user));
   const assignedBitrixTasks = bitrixUserTasks?.tasks || [];
   const bitrixTasks = dedupeTasks([...projectBitrixTasks, ...assignedBitrixTasks]);
   const completedPlanTasks = planItems.filter((item) => item.status === "done").length;
@@ -874,6 +880,20 @@ function calculateDailyMetrics({ user, date, plan, bitrix, bitrixUserTasks, metr
     notes,
     updatedAt: new Date().toISOString(),
   };
+}
+
+function taskBelongsToUser(task, user) {
+  const platrumId = user?.platrumUserId !== null && user?.platrumUserId !== undefined ? String(user.platrumUserId) : null;
+  const platrumName = user?.platrumUsername ? String(user.platrumUsername).toLowerCase() : null;
+  const bitrixId = user?.bitrixUserId !== null && user?.bitrixUserId !== undefined ? String(user.bitrixUserId) : null;
+  const assigneeId = task?.assigneeId !== null && task?.assigneeId !== undefined ? String(task.assigneeId) : null;
+  const assigneeName = task?.assigneeUsername ? String(task.assigneeUsername).toLowerCase() : null;
+  const responsibleId = task?.responsibleId !== null && task?.responsibleId !== undefined ? String(task.responsibleId) : null;
+  return Boolean(
+    (platrumId && assigneeId && assigneeId === platrumId) ||
+    (platrumName && assigneeName && assigneeName === platrumName) ||
+    (bitrixId && responsibleId && responsibleId === bitrixId),
+  );
 }
 
 function dedupeTasks(tasks) {

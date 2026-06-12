@@ -89,6 +89,7 @@ export class HttpClaudeClient {
         text: readTextContent(payload),
         model: payload.model || requestModel,
         usage: normalizeUsage(payload.usage),
+        stopReason: payload.stop_reason || null,
         configured: true,
       };
     } finally {

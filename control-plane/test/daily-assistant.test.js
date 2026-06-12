@@ -42,7 +42,9 @@ test("daily assistant creates plan, marks done, and calculates progress", async 
   assert.equal(progress.metrics.plannedTasks, 3);
   assert.equal(progress.metrics.completedTasks, 1);
   assert.equal(progress.metrics.overdueTasks, 1);
-  assert.equal(progress.metrics.projectBitrixTasks, 2);
+  // Only the project task assigned to u-pm-1 counts into personal metrics;
+  // the other member's task is excluded.
+  assert.equal(progress.metrics.projectBitrixTasks, 1);
   assert.equal(progress.metrics.assignedBitrixTasks, 1);
   assert.equal(progress.metrics.activeSeconds, 18_000);
   assert.equal(progress.blockers.length, 1);
@@ -121,6 +123,8 @@ function fakeBitrixClient() {
             title: "Done task",
             status: 5,
             statusLabel: "completed",
+            // Assigned to another member: excluded from personal metrics.
+            responsibleId: "1",
             deadline: "2026-06-05T12:00:00.000Z",
           },
           {
@@ -128,6 +132,8 @@ function fakeBitrixClient() {
             title: "Late task",
             status: 3,
             statusLabel: "in_progress",
+            // Assigned to u-pm-1 (bitrixUserId 17 in seed).
+            responsibleId: "17",
             deadline: "2026-06-04T12:00:00.000Z",
           },
         ],

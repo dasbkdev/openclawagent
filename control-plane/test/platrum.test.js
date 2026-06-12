@@ -236,3 +236,65 @@ test("Platrum user report stores employee KPI snapshot", async () => {
   assert.equal(state.platrumSnapshots.length, 1);
   assert.equal(state.auditLog.at(-1).action, "platrum.user_status.read");
 });
+
+test("Platrum user report does not attribute other members' project tasks", async () => {
+  const state = createInitialState();
+  const owner = getUserById(state, "u-nikolay");
+  const targetUser = getUserById(state, "u-pm-1");
+  targetUser.platrumUserId = 18;
+  targetUser.platrumUsername = "beks";
+  const client = {
+    async getUserTasks() {
+      return {
+        source: "test",
+        configured: true,
+        platrumUserId: 18,
+        platrumUsername: "beks",
+        tasks: [],
+      };
+    },
+    async getProjectTasks() {
+      return {
+        source: "test",
+        configured: true,
+        platrumProjectId: 6,
+        tasks: [
+          {
+            id: 50,
+            title: "Задача Максата",
+            statusLabel: "review",
+            overdue: true,
+            assigneeId: 23,
+            assigneeUsername: "max",
+          },
+          {
+            id: 51,
+            title: "Задача Бегайым в проекте",
+            statusLabel: "completed",
+            overdue: false,
+            assigneeId: 18,
+            assigneeUsername: "beks",
+          },
+        ],
+      };
+    },
+    async getDailyReports() {
+      return { source: "test", configured: true, reports: [] };
+    },
+    async getTeamMetrics() {
+      return { source: "test", configured: true, metrics: {} };
+    },
+  };
+
+  const report = await buildPlatrumUserStatusReport(state, {
+    actor: owner,
+    request: { userId: "u-pm-1" },
+    platrumClient: client,
+  });
+
+  const combinedIds = report.combined.tasks.map((task) => task.id);
+  assert.deepEqual(combinedIds, [51]);
+  assert.equal(report.analytics.taskSummary.total, 1);
+  assert.equal(report.analytics.taskSummary.overdue, 0);
+  assert.equal(report.combined.summary.completed, 1);
+});

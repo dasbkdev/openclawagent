@@ -19,6 +19,7 @@ export const TELEGRAM_BOT_COMMANDS = Object.freeze([
   { command: "google_status", description: "статус Google подключения" },
   { command: "tokens", description: "расход токенов" },
   { command: "ai_status", description: "проверка Claude API" },
+  { command: "status", description: "статус интеграций (только владелец)" },
 ]);
 
 export function formatCommandMenuHelp(commands = TELEGRAM_BOT_COMMANDS) {

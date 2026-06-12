@@ -8216,12 +8216,158 @@ orchestration: Architect (Fable 5) -> expert (Opus) -> developer (Sonnet).
 
 ### Not Done / Next
 
-- NOT deployed to production - server credentials are not present on this PC.
-  Deploy plan: copy changed `control-plane/src` + new tests to
-  `/opt/company-control-plane`, run `npm test` on server, restart both systemd
-  services, verify journalctl + live Telegram smoke (free-form answer
-  formatting, /report splitting, voice reply).
+- Deployed to production on 2026-06-12 (see next section).
 - `CLAUDE_MEMORY_MODEL` env var optional; default haiku is fine.
 - Distillation adds a post-answer Haiku call per free-form message; if API is
   slow, consider full fire-and-forget later.
 - No git commits made; everything is in the working tree for review.
+
+## 2026-06-12 - Production deployment of Memory v2 + render layer
+
+### Deployed
+
+- Server: starlabopenclaw-1 (195.238.122.228), /opt/company-control-plane.
+- Backup before deploy:
+  - /opt/company-control-plane/.deploy-backups/20260612-142335 (src + test)
+  - /var/lib/company-control-plane/control-plane.json.memory-v2-backup-20260612-142335
+- Copied full `control-plane/src` and `control-plane/test` via pscp
+  (test suites are now in sync: server had 15 test files, now 22).
+- Ownership fixed: company-control-plane:company-control-plane.
+
+### Verification
+
+- Server `npm test`: 149 passed, 0 failed (server Node v22.22.3).
+- Restarted both systemd services; both `active`.
+- `GET /health` on 127.0.0.1:3099: ok.
+- Startup logs clean: metricon/platrum/bitrix connectors configured,
+  telegram polling started, 20 commands synchronized.
+- 3-minute journal scan after restart: no errors/warnings.
+- `control-plane.json.lock` observed transiently and released correctly;
+  state file is being written by the bot loop as expected.
+
+### Pending live checks (need a real Telegram user)
+
+- Free-form question: answer must be structured HTML without raw `**`/`###`.
+- Long `/report` or `/platrum`: must arrive split into parts, not fail.
+- Voice reply: TTS must read plain text without HTML tags.
+- Next day: `assistantDailySummaries` and `assistantFacts` should appear in
+  runtime state for active users.
+
+### Security note
+
+- Server root password was shared in chat during this deployment. Recommend
+  rotating it and/or switching to SSH key auth. Password is not recorded in
+  this worklog or anywhere in the repository.
+
+## 2026-06-12 - Hotfix: raw JSON leaked to Telegram user
+
+### Problem (reported by user with screenshot)
+
+Free-form assistant answer arrived in Telegram as raw JSON text, cut off
+mid-string. Root cause chain:
+
+1. `claudeClient.complete()` was called without `maxTokens`, so the default
+   `900` applied; a rich structured answer did not fit and was truncated by
+   the token limit mid-JSON.
+2. Truncated JSON failed `JSON.parse`, and the fallback path sent the raw
+   model output (the broken JSON) to the user as plain text.
+
+### Fix (control-plane/src/assistant/company-assistant.js, claude-client.js)
+
+- Assistant answers now request `maxTokens: 3000`.
+- `claude-client` returns `stopReason` (`payload.stop_reason`); when it is
+  `max_tokens`, the rendered answer gets a visible note that it was shortened.
+- `parseStructuredAnswer` now repairs truncated JSON: closes an unterminated
+  string, drops dangling `,`/`:` separators or a dangling key, closes all open
+  brackets, and tries progressively more aggressive candidates.
+- Hard guarantee: if text looks like structured JSON but cannot be parsed even
+  after repair, readable string values are salvaged and sent as plain lines;
+  raw JSON syntax can never reach the user anymore.
+
+### Verification
+
+- Local `npm test`: 155 passed, 0 failed (+6 salvage/repair tests in
+  `test/assistant-answer-salvage.test.js`).
+- Server `npm test`: 155 passed, 0 failed.
+- Both services restarted and active; /health ok; bot polling started.
+
+## 2026-06-12 - Sprint: attribution bugfix + production hardening pack
+
+### Bug: Maksat's Platrum task attributed to Begayym (user-reported)
+
+Root causes found and fixed in three layers:
+
+1. Prompt: system prompt now forbids attributing tasks with another
+   assignee; personal stats/efficiency only from tasks where the target
+   user is the assignee (`company-assistant.js`).
+2. Data, /platrum report: `buildPlatrumUserStatusReport` computed employee
+   KPI from `combinedTasks` = user tasks + ALL project board tasks.
+   Now project tasks are filtered by assignee match (platrumUserId or
+   platrumUsername) before combining (`platrum-reports.js`,
+   `taskAssignedToUser` exported).
+3. Data, daily assistant: `calculateDailyMetrics` merged all project tasks
+   into personal daily metrics. Now filtered via `taskBelongsToUser`
+   (platrum assigneeId/assigneeUsername or bitrix responsibleId)
+   (`daily-assistant.js`).
+Also: Platrum task `raw` payload no longer sent into Claude context
+(token bloat). `tasksScope: "all_project_members"` marks project task lists.
+Regression tests added (platrum.test.js, daily-assistant.test.js updated).
+
+### Production checks performed
+
+- Production mappings verified: u-pm-1 platrum 18/beks, u-maksat 23/max -
+  mappings were correct; bug was attribution logic.
+- Memory v2 confirmed accumulating in production (facts: 6, open loops: 4,
+  daily summaries: 2 at check time).
+- Metricon employees list pulled live: Maksat is STILL absent in Metricon -
+  cannot map without inventing data. PM candidates present in Metricon:
+  29 (Айзирек пм), 39 (Жибек), 75 (aizirek1@), 76 (Перизат) - business
+  decision needed for u-pm-2/u-pm-3 mapping.
+- Live Google token validation: u-nikolay and u-maksat REFRESH_FAILED
+  (tokens from the disabled OAuth client) - both must redo /google_connect;
+  u-pm-1 and u-pm-2 are live; u-pm-3 never connected.
+
+### Infrastructure pack (developer agent, reviewed)
+
+- `src/domain/integration-health.js` + `GET /api/v1/health/integrations`
+  (automation token or OWNER actor) + `/status` Telegram command (OWNER).
+  Live check on production: all 7 integrations ok.
+- Internal API token (opt-in): `INTERNAL_API_TOKEN` env + `X-Internal-Token`
+  header for `/api/v1/*` with exemptions for device/automation/setup/oauth/
+  local-agent paths. Architect review added the missing `/api/v1/local-agent/`
+  exemption (publicly proxied desktop-agent chat would have broken).
+  Enabled on production; verified 401 without header, 200 with.
+- CI: `.github/workflows/control-plane-tests.yml` (npm test on push/PR).
+- `scripts/deploy-to-server.ps1` - one-command deploy with backup/rollback.
+- `scripts/linux/backup-runtime.sh` + `install-backup-timer.sh`: daily
+  03:30 UTC systemd timer, 14 archives retention. Installed on production;
+  first backup created.
+
+### Server/ops changes
+
+- SSH key auth set up (ed25519, `~/.ssh/starlab_server` on Nikolay's PC);
+  password no longer used in commands. Recommend rotating root password.
+- n8n duplicate Telegram workflow `starlabTelegramMvp01` deactivated
+  (control-plane bot is the single Telegram owner). Schedules
+  (`starlabDailyAssistant01`) and heartbeat mirror remain active.
+- Nginx: public `/health` now routed to control-plane (was n8n);
+  config backup kept; nginx -t + reload verified; other public pages 200.
+
+### Verification
+
+- Local and server `npm test`: **165 passed, 0 failed**.
+- Services + backup timer active, `/health` ok, integrations health all ok.
+
+### Deferred (explicitly, with reasons)
+
+- PostgreSQL migration: deferred from this 2-day sprint; cross-process
+  file lock covers the race for current load. Plan next.
+- kickidler->metricon rename and handler/router refactor: deferred as
+  non-blocking code-quality work.
+
+### Needs user/business action
+
+1. Nikolay and Maksat: re-run /google_connect in Telegram.
+2. Decide Metricon mapping for u-pm-2/u-pm-3; add Maksat to Metricon if
+   his activity should be tracked.
+3. Rotate server root password (SSH key now available).

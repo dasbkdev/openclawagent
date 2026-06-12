@@ -1,0 +1,28 @@
+name: Control plane tests
+
+on:
+  push:
+    paths:
+      - "control-plane/**"
+  pull_request:
+    paths:
+      - "control-plane/**"
+
+jobs:
+  test:
+    name: npm test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: control-plane
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run tests
+        run: npm test
