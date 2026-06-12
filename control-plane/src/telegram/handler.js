@@ -42,6 +42,7 @@ import { VoiceServiceError } from "../integrations/voice-service.js";
 import { formatCommandMenuHelp, TELEGRAM_BOT_COMMANDS } from "./bot-commands.js";
 import { parseTelegramCommand, resolveReportPeriod } from "./commands.js";
 import { sendTokenUsageReportNow } from "./token-usage-reporter.js";
+import { escapeHtml, markdownToTelegramHtml, renderBlocks, sendLongMessage } from "./render.js";
 
 export async function handleTelegramMessage({
   store,
@@ -388,6 +389,53 @@ export async function handleTelegramMessage({
       chatId,
       text: formatTelegramError(error),
     });
+  }
+}
+
+/**
+ * Process a single Telegram update with its own error isolation: a
+ * failure handling one update is logged and (best-effort) reported to
+ * the chat, but never propagates to the caller so the rest of a batch of
+ * updates keeps being processed.
+ *
+ * `buildMessageDeps` is called once per update and must return the
+ * extra dependencies handleTelegramMessage needs (kickidlerClient,
+ * bitrixClient, platrumClient, claudeClient, voiceService, ...).
+ */
+export async function processTelegramUpdate({ update, store, telegram, googleOAuthService, buildMessageDeps, now = new Date() }) {
+  if (!update?.message) {
+    return;
+  }
+
+  try {
+    const extraDeps = buildMessageDeps ? await buildMessageDeps(update) : {};
+    await handleTelegramMessage({
+      store,
+      telegram,
+      googleOAuthService,
+      ...extraDeps,
+      message: update.message,
+      now,
+    });
+  } catch (error) {
+    console.error(
+      `telegram update ${update.update_id} failed:`,
+      error instanceof Error ? error.message : error,
+    );
+    const chatId = update.message?.chat?.id;
+    if (chatId) {
+      try {
+        await telegram.sendMessage({
+          chatId,
+          text: "Не получилось обработать сообщение, попробуй ещё раз.",
+        });
+      } catch (sendError) {
+        console.error(
+          `telegram update ${update.update_id} failure notice failed:`,
+          sendError instanceof Error ? sendError.message : sendError,
+        );
+      }
+    }
   }
 }
 
@@ -752,7 +800,7 @@ async function sendKickidlerReport({ store, telegram, chatId, telegramUserId, ki
     });
   });
 
-  await telegram.sendMessage({ chatId, text: formatMetriconReport(report, period.label) });
+  await sendLongMessage({ telegram, chatId, text: formatMetriconReport(report, period.label) });
 }
 
 async function sendBitrixReport({ store, telegram, chatId, telegramUserId, bitrixClient, projectId }) {
@@ -765,7 +813,7 @@ async function sendBitrixReport({ store, telegram, chatId, telegramUserId, bitri
     });
   });
 
-  await telegram.sendMessage({ chatId, text: formatBitrixReport(report) });
+  await sendLongMessage({ telegram, chatId, text: formatBitrixReport(report) });
 }
 
 async function sendPlatrumReport({ store, telegram, chatId, telegramUserId, platrumClient, projectId }) {
@@ -778,7 +826,7 @@ async function sendPlatrumReport({ store, telegram, chatId, telegramUserId, plat
     });
   });
 
-  await telegram.sendMessage({ chatId, text: formatPlatrumReport(report) });
+  await sendLongMessage({ telegram, chatId, text: formatPlatrumReport(report) });
 }
 
 async function saveDailyPlan({ store, telegram, chatId, telegramUserId, text, now }) {
@@ -875,7 +923,7 @@ async function sendDailyReport({ store, telegram, chatId, telegramUserId, kickid
     });
   });
 
-  await telegram.sendMessage({ chatId, text: formatManagerReport(report) });
+  await sendLongMessage({ telegram, chatId, text: formatManagerReport(report) });
 }
 
 async function sendTokenUsageReport({ store, telegram, chatId, telegramUserId, periodName, now }) {
@@ -1639,11 +1687,29 @@ function stripVoiceDirectiveFromCommand(command) {
 async function sendAssistantAnswer({ telegram, chatId, answer, voiceService, voiceReplyRequested }) {
   void voiceService;
   void voiceReplyRequested;
-  await telegram.sendMessage({ chatId, text: formatAssistantAnswer(answer) });
+  const { html } = formatAssistantAnswer(answer);
+  await sendLongMessage({ telegram, chatId, text: html });
 }
 
+/**
+ * Build the Telegram HTML and plain-text representations of an assistant
+ * answer. `answer` may be either a structured object
+ * ({ html, plainText, blocks? }) produced by answerCompanyAssistant, or a
+ * legacy plain string (markdown/plain text), in which case it is converted
+ * via markdownToTelegramHtml.
+ */
 function formatAssistantAnswer(answer) {
-  return escapeHtml(answer);
+  if (answer && typeof answer === "object") {
+    return {
+      html: typeof answer.html === "string" ? answer.html : escapeHtml(answer.plainText ?? ""),
+      plainText: typeof answer.plainText === "string" ? answer.plainText : "",
+    };
+  }
+  const text = String(answer ?? "");
+  return {
+    html: markdownToTelegramHtml(text),
+    plainText: text,
+  };
 }
 
 function formatRole(role) {
@@ -1738,11 +1804,4 @@ function assertGoogleOAuthService(googleOAuthService) {
   if (!googleOAuthService) {
     throw new Error("Google OAuth service is not enabled.");
   }
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }

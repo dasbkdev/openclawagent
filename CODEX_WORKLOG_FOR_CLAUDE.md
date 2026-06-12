@@ -8154,3 +8154,74 @@ Security note:
 - Plaintext passwords/API keys were intentionally not copied into the handoff
   document. The file explains where secrets live and how to update them, but
   credentials should be issued separately through the owner/password manager.
+
+## 2026-06-12 - Memory v2 + Telegram render layer (Claude multi-agent orchestration)
+
+### User Request
+
+Strengthen assistant memory so each employee's assistant remembers everything
+(open follow-ups, long-term facts), and fix ugly unstructured Telegram answers
+with raw Markdown garbage. Also apply previously proposed fixes. Work done on
+Nikolay's PC (`C:\Users\dasmu\openclawagent`, branch `server`), via Claude Code
+orchestration: Architect (Fable 5) -> expert (Opus) -> developer (Sonnet).
+
+### Implemented - Memory v2
+
+- Cross-process file lock in `src/infra/json-store.js` (`<file>.lock`, `wx`
+  create, backoff, 5s timeout, 30s stale reap) - fixes API/bot write race.
+- New `src/domain/assistant-open-loops.js` - open follow-ups (command_follow_up,
+  promise, question, task_progress) with open/resolve/expire lifecycle; failed
+  device commands auto-open a loop in router, successful retry resolves it.
+- New `src/domain/assistant-facts.js` - long-term per-user facts with dedup,
+  supersede, cap 200 active per user.
+- New `src/assistant/memory-distiller.js` - after each free-form answer, Claude
+  (`CLAUDE_MEMORY_MODEL`, default `claude-haiku-4-5-20251001`) extracts facts /
+  resolves loops from the exchange; fully fail-safe; usage recorded as
+  `assistant.memory.distill`.
+- New `src/domain/assistant-summaries.js` - daily per-user summaries
+  (yesterday, Asia/Bishkek), generated in bot loop, cap 30 per user.
+- New `src/infra/memory-archive.js` - per-user JSONL archive next to data file;
+  journal cap changed from global 10000 to per-user 2000; evicted events are
+  archived, nothing is lost; keyword search over archive tail.
+- `buildAssistantMemoryContextV2` - context = facts + open loops + last 3 daily
+  summaries + recent events + keyword-relevant events (journal + archive),
+  replaces "last 24 events" in `company-assistant`.
+- `claude-client.js` `complete()` accepts optional per-call `model`.
+
+### Implemented - Telegram render layer
+
+- New `src/telegram/render.js`: typed blocks -> Telegram HTML, limited
+  Markdown -> HTML converter (always balanced tags), `splitTelegramMessage`
+  (4096 limit, paragraph/line boundaries, tag-safe splits), `sendLongMessage`.
+- `company-assistant` system prompt now requires strict JSON answer
+  ({title, sections, next_steps}); parsed defensively, rendered via blocks;
+  fallback Markdown->HTML. Returns `{html, plainText}`; plainText goes to
+  memory/distiller/TTS, html to Telegram - raw `**`/`###` garbage eliminated.
+- Long reports (`/report`, `/platrum`, `/bitrix`, `/daily_report`, assistant
+  answers) sent via `sendLongMessage`.
+- Bot loop: per-update try/catch isolation (`processTelegramUpdate` in
+  handler.js), offset always advances, poison message cannot stall the queue,
+  user gets a short error notice.
+- Architect review fix: device-agent chat endpoint
+  (`POST .../device-agents/...` in router.js) kept returning a string `answer`
+  (plainText) for backward compatibility with `device-agent.js` and
+  `desktop-agent/main.cjs`; `answerHtml` added alongside.
+
+### Verification
+
+- Local `npm test`: **149 passed, 0 failed** (baseline was 95; +32 memory
+  tests, +22 render/loop tests).
+- `git diff --check`: clean. `node --check` on all changed files.
+- Node.js v24.16.0 installed on this PC (was missing).
+
+### Not Done / Next
+
+- NOT deployed to production - server credentials are not present on this PC.
+  Deploy plan: copy changed `control-plane/src` + new tests to
+  `/opt/company-control-plane`, run `npm test` on server, restart both systemd
+  services, verify journalctl + live Telegram smoke (free-form answer
+  formatting, /report splitting, voice reply).
+- `CLAUDE_MEMORY_MODEL` env var optional; default haiku is fine.
+- Distillation adds a post-answer Haiku call per free-form message; if API is
+  slow, consider full fire-and-forget later.
+- No git commits made; everything is in the working tree for review.

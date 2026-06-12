@@ -25,6 +25,11 @@ import {
   tryCreateNaturalDeviceCommand,
 } from "../domain/natural-device-actions.js";
 import { recordAssistantMemoryEvent } from "../domain/assistant-memory.js";
+import {
+  findOpenLoopBySource,
+  openAssistantLoop,
+  resolveAssistantLoop,
+} from "../domain/assistant-open-loops.js";
 import { buildKickidlerActivitySummary } from "../domain/reports.js";
 import {
   buildTokenUsageSummary,
@@ -522,7 +527,13 @@ export function createRouter({
           platrumClient: resolvePlatrumClient(),
           googleOAuthService,
         });
-        sendJson(response, 200, { ok: true, data: { answer } });
+        sendJson(response, 200, {
+          ok: true,
+          data: {
+            answer: typeof answer === "string" ? answer : answer.plainText,
+            answerHtml: typeof answer === "string" ? null : answer.html,
+          },
+        });
         return;
       }
 
@@ -565,6 +576,7 @@ export function createRouter({
               type: command.type,
             },
           });
+          syncDeviceCommandOpenLoop(state, command);
           return { command };
         });
         sendJson(response, 200, { ok: true, data: result });
@@ -1128,6 +1140,54 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function deviceCommandSignature(command) {
+  return `${command.type}:${JSON.stringify(command.args || {})}`;
+}
+
+/**
+ * Records the success/failure of a device command as an assistant open loop so the
+ * memory layer can surface unresolved follow-ups. This is additive: the retry logic
+ * itself lives in natural-device-actions.js and is not duplicated here.
+ */
+export function syncDeviceCommandOpenLoop(state, command) {
+  if (!command?.userId) {
+    return;
+  }
+  const signature = deviceCommandSignature(command);
+  const failed = ["failed", "rejected", "unsupported"].includes(command.status);
+  if (failed) {
+    const existing = findOpenLoopBySource(state, {
+      userId: command.userId,
+      type: "device_command",
+      id: signature,
+    });
+    if (!existing) {
+      openAssistantLoop(state, {
+        userId: command.userId,
+        kind: "command_follow_up",
+        text: `Команда ${command.type} не выполнилась: ${command.error || command.status}`,
+        source: { type: "device_command", id: signature },
+        metadata: { commandId: command.id, type: command.type, status: command.status },
+      });
+    }
+    return;
+  }
+  if (command.status === "succeeded") {
+    const existing = findOpenLoopBySource(state, {
+      userId: command.userId,
+      type: "device_command",
+      id: signature,
+    });
+    if (existing) {
+      resolveAssistantLoop(state, {
+        id: existing.id,
+        userId: command.userId,
+        resolution: `Команда ${command.type} выполнена при повторе (${command.id}).`,
+      });
+    }
+  }
 }
 
 export function requireActor(state, request) {

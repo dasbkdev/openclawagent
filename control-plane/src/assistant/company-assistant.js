@@ -2,10 +2,13 @@ import { summarizeTasks } from "../domain/bitrix-reports.js";
 import { buildEmployeeKpi, ensurePlatrumAnalyticsState, summarizePlatrumTasks } from "../domain/platrum-reports.js";
 import { buildDailyAssistantContext } from "../domain/daily-assistant.js";
 import {
-  buildAssistantMemoryContext,
+  buildAssistantMemoryContextV2,
   buildRecentDeviceCommandMemory,
+  drainEvictedMemoryEvents,
   recordAssistantMemoryEvent,
 } from "../domain/assistant-memory.js";
+import { distillAssistantMemory } from "./memory-distiller.js";
+import { appendMemoryArchive } from "../infra/memory-archive.js";
 import { listVisibleDeviceAgents } from "../domain/device-agents.js";
 import { unauthorized } from "../domain/errors.js";
 import { appendAuditEvent } from "../infra/audit.js";
@@ -16,6 +19,7 @@ import {
   publicProject,
   publicUser,
 } from "../domain/policy.js";
+import { markdownToTelegramHtml, renderBlocks } from "../telegram/render.js";
 
 const MAX_CONTEXT_USERS = 8;
 const MAX_CONTEXT_PROJECTS = 6;
@@ -43,7 +47,8 @@ export async function answerCompanyAssistant({
 }) {
   const trimmedQuestion = String(question || "").trim();
   if (!trimmedQuestion) {
-    return "Напиши вопрос текстом. Например: «Как сегодня работала Бегайым?»";
+    const plainText = "Напиши вопрос текстом. Например: «Как сегодня работала Бегайым?»";
+    return { html: markdownToTelegramHtml(plainText), plainText };
   }
 
   const state = await store.load();
@@ -58,6 +63,7 @@ export async function answerCompanyAssistant({
     bitrixClient,
     platrumClient,
     googleOAuthService,
+    dataFilePath: store.filePath || null,
     now,
   });
 
@@ -66,7 +72,9 @@ export async function answerCompanyAssistant({
     user: buildUserPrompt({ question: trimmedQuestion, context }),
   });
 
-  await store.update((currentState) => {
+  const rendered = renderAssistantCompletion(completion.text);
+
+  const evicted = await store.update((currentState) => {
     appendAuditEvent(currentState, {
       actorUserId: actor.id,
       actorTelegramUserId: actor.telegram?.telegramUserId,
@@ -125,7 +133,7 @@ export async function answerCompanyAssistant({
       channel,
       role: "assistant",
       kind: "assistant_answer",
-      text: completion.text,
+      text: rendered.plainText,
       target: {
         userIds: context.targetUsers.map((user) => user.id),
         projectIds: context.projects.map((project) => project.id),
@@ -136,9 +144,127 @@ export async function answerCompanyAssistant({
       now,
     });
     recordAssistantPlatrumSnapshots(currentState, { context, now });
+    return drainEvictedMemoryEvents(currentState);
   });
 
-  return completion.text;
+  await archiveEvictedEvents(store, evicted);
+
+  if (completion.configured !== false) {
+    await distillAssistantMemory({
+      store,
+      claudeClient,
+      actor,
+      question: trimmedQuestion,
+      answer: rendered.plainText,
+      now,
+    });
+  }
+
+  return { html: rendered.html, plainText: rendered.plainText };
+}
+
+/**
+ * Parse the model's structured JSON answer
+ * ({ title, sections: [{ heading, lines }], next_steps }) into Telegram
+ * HTML (via renderBlocks) and a plain-text version (for memory/voice).
+ * Falls back to markdown-to-HTML conversion of the raw text if the
+ * response is not valid JSON in the expected shape.
+ */
+function renderAssistantCompletion(answerText) {
+  const raw = String(answerText ?? "");
+  const parsed = parseStructuredAnswer(raw);
+  if (parsed) {
+    const blocks = [];
+    const plainLines = [];
+
+    if (parsed.title) {
+      blocks.push({ type: "title", text: parsed.title });
+      plainLines.push(parsed.title);
+    }
+
+    for (const section of parsed.sections || []) {
+      if (!section || typeof section !== "object") {
+        continue;
+      }
+      const lines = Array.isArray(section.lines)
+        ? section.lines.map((line) => String(line ?? "")).filter((line) => line.length > 0)
+        : [];
+      blocks.push({ type: "section", heading: section.heading || "", lines });
+      if (section.heading) {
+        plainLines.push("", String(section.heading));
+      }
+      for (const line of lines) {
+        plainLines.push(line);
+      }
+    }
+
+    if (Array.isArray(parsed.next_steps) && parsed.next_steps.length > 0) {
+      const items = parsed.next_steps.map((item) => String(item ?? "")).filter((item) => item.length > 0);
+      if (items.length > 0) {
+        blocks.push({ type: "section", heading: "Следующие шаги", lines: [] });
+        blocks.push({ type: "list", items });
+        plainLines.push("", "Следующие шаги");
+        for (const item of items) {
+          plainLines.push(`- ${item}`);
+        }
+      }
+    }
+
+    return {
+      html: renderBlocks(blocks),
+      plainText: plainLines.join("\n").trim(),
+    };
+  }
+
+  return {
+    html: markdownToTelegramHtml(raw),
+    plainText: raw,
+  };
+}
+
+/**
+ * Try to parse the assistant response as the structured JSON answer
+ * format. Defensively extracts the JSON object between the first `{`
+ * and the last `}` to tolerate surrounding prose/code fences. Returns
+ * null if no valid object with a recognizable shape is found.
+ */
+function parseStructuredAnswer(text) {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+  const candidate = text.slice(start, end + 1);
+  let value;
+  try {
+    value = JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  if (typeof value.title !== "string" && !Array.isArray(value.sections)) {
+    return null;
+  }
+  return value;
+}
+
+async function archiveEvictedEvents(store, evicted) {
+  if (!Array.isArray(evicted) || evicted.length === 0) {
+    return;
+  }
+  const byUser = new Map();
+  for (const event of evicted) {
+    const userId = event.userId || "unknown";
+    if (!byUser.has(userId)) {
+      byUser.set(userId, []);
+    }
+    byUser.get(userId).push(event);
+  }
+  for (const [userId, events] of byUser.entries()) {
+    await appendMemoryArchive({ dataFilePath: store.filePath || null, userId, events });
+  }
 }
 
 export async function buildAssistantContext({
@@ -149,6 +275,7 @@ export async function buildAssistantContext({
   bitrixClient,
   platrumClient,
   googleOAuthService,
+  dataFilePath = null,
   now = new Date(),
 }) {
   const accessibleUserIds = new Set(listAccessibleUserIds(state, actor));
@@ -172,7 +299,12 @@ export async function buildAssistantContext({
     calendarSearchTerms,
   });
   const dailyAssistant = buildDailyAssistantContext(state, { targetUsers, now });
-  const memory = buildAssistantMemoryContext(state, { actor, targetUsers });
+  const memory = await buildAssistantMemoryContextV2(state, {
+    actor,
+    targetUsers,
+    question,
+    dataFilePath,
+  });
   const recentDeviceCommands = buildRecentDeviceCommandMemory(state, { actor, targetUsers });
 
   return {
@@ -754,7 +886,12 @@ function buildSystemPrompt() {
     "Если Google Workspace connected=false, скажи, что сотрудник еще не подключил Google через /google_connect.",
     "Если Google Docs/Sheets text или rows truncated/ограничены, честно скажи, что виден только короткий фрагмент.",
     "Если dailyAssistant содержит план, blockers или metrics, учитывай их как рабочий план дня и текущий прогресс.",
-    "Use context.memory for short-term conversation continuity. If user says 'не открылось', 'то же самое', 'оставшиеся', resolve it from memory and recentDeviceCommands.",
+    "Память (context.memory) v2 состоит из секций:",
+    "Открытые дела (context.memory.openLoops) — сначала проверь и закрой/обнови их: незавершённые команды, обещания, открытые вопросы. Если вопрос относится к открытому делу, ответь по нему и отметь прогресс.",
+    "Известные факты о сотруднике (context.memory.facts) — устойчивые обязательства, предпочтения, привычки и проекты. Учитывай их, но не выдумывай поверх них.",
+    "Сводки прошлых дней (context.memory.dailySummaries) — краткий контекст того, что было раньше.",
+    "Релевантные старые события (context.memory.relatedEvents) — подобранные по теме вопроса записи журнала (source=journal) и архива (source=archive). Используй их для непрерывности.",
+    "Недавние события (context.memory.recentEvents) — последние реплики диалога для краткосрочной непрерывности. If user says 'не открылось', 'то же самое', 'оставшиеся', resolve it from recentEvents, openLoops and recentDeviceCommands.",
     "Use context.recentDeviceCommands to understand whether a local desktop action was queued, claimed, succeeded, failed or expired.",
     "Эффективность по задачам считай как completed / total * 100, если есть задачи.",
     "Не упоминай системные токены, секреты, внутренние webhook-и или пароли.",
@@ -764,6 +901,11 @@ function buildSystemPrompt() {
     "When Bitrix project tasks are empty, also check bitrixUserTasks. User-assigned tasks can be personal or in a different workgroup.",
     "For task and project questions, prefer platrum.userTasks and platrum.projectTasks over Bitrix.",
     "For employee work schedules and calendar summaries, first check googleWorkspace.users[].sharedCalendars. These are Google 'Other calendars' from connected PM accounts.",
+    "",
+    "RESPONSE FORMAT (strict): Reply with ONLY a single JSON object, no markdown, no code fences, no extra prose before or after it.",
+    'Shape: {"title": "...", "sections": [{"heading": "...", "lines": ["...", "..."]}], "next_steps": ["..."]}.',
+    "title is a short headline for the answer. sections is a list of labeled groups of plain-text lines (no markdown formatting, no JSON, no asterisks). next_steps is a list of short follow-up suggestions and may be an empty array if there is nothing to suggest.",
+    "Every line in sections and next_steps must be plain text without any Markdown syntax (no **, ##, -, backticks).",
   ].join(" ");
 }
 

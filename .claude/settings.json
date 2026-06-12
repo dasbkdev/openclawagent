@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(node --check:*)",
+      "Bash(node --test:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "deny": [
+      "Read(**/secrets.json)",
+      "Read(**/secrets.key)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/admin-credentials.txt)",
+      "Read(kickidler/**)"
+    ]
+  }
+}

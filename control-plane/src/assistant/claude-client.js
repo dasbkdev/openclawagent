@@ -52,9 +52,10 @@ export class HttpClaudeClient {
     this.configured = true;
   }
 
-  async complete({ system, user, maxTokens = 900 }) {
+  async complete({ system, user, maxTokens = 900, model }) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const requestModel = model || this.model;
     try {
       const response = await fetch(this.endpoint, {
         method: "POST",
@@ -66,7 +67,7 @@ export class HttpClaudeClient {
           "anthropic-version": DEFAULT_ANTHROPIC_VERSION,
         },
         body: JSON.stringify({
-          model: this.model,
+          model: requestModel,
           max_tokens: maxTokens,
           system,
           messages: [{ role: "user", content: user }],
@@ -86,7 +87,7 @@ export class HttpClaudeClient {
 
       return {
         text: readTextContent(payload),
-        model: payload.model || this.model,
+        model: payload.model || requestModel,
         usage: normalizeUsage(payload.usage),
         configured: true,
       };

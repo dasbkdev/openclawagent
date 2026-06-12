@@ -11,10 +11,12 @@ import { JsonStore, resolveDefaultDataFile } from "./infra/json-store.js";
 import { createSetupService } from "./setup/setup-service.js";
 import { TELEGRAM_BOT_COMMANDS } from "./telegram/bot-commands.js";
 import { sendDueDailyAssistantMessages } from "./telegram/daily-assistant-reporter.js";
-import { handleTelegramMessage } from "./telegram/handler.js";
+import { processTelegramUpdate } from "./telegram/handler.js";
 import { TelegramBotApi } from "./telegram/telegram-api.js";
 import { sendDueTokenUsageReports } from "./telegram/token-usage-reporter.js";
 import { createVoiceServiceFromEnv } from "./integrations/voice-service.js";
+import { runDueMemorySummaries } from "./domain/assistant-summaries.js";
+import { expireStaleAssistantLoops } from "./domain/assistant-open-loops.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -64,6 +66,17 @@ while (true) {
       telegram,
       recipientTelegramId: process.env.TOKEN_USAGE_REPORT_TELEGRAM_ID || "984834133",
     });
+    try {
+      await runDueMemorySummaries({ store, claudeClient: createClaudeClientFromEnv() });
+      await store.update((state) => {
+        expireStaleAssistantLoops(state, { now: new Date() });
+      });
+    } catch (error) {
+      console.error(
+        "memory maintenance failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
     await sendDueDailyAssistantMessages({
       store,
       telegram,
@@ -74,20 +87,22 @@ while (true) {
     });
     const updates = await telegram.getUpdates({ offset, timeout: 25 });
     for (const update of updates) {
+      // Advance the offset before processing so a "poison" update can
+      // never cause an infinite reprocessing loop.
       offset = update.update_id + 1;
-      if (update.message) {
-        await handleTelegramMessage({
-          store,
-          telegram,
+      await processTelegramUpdate({
+        update,
+        store,
+        telegram,
+        googleOAuthService,
+        buildMessageDeps: async () => ({
           kickidlerClient: await createMetriconClient(),
           bitrixClient: createBitrixClientFromEnv(),
           platrumClient: createPlatrumClientFromEnv(),
           claudeClient: createClaudeClientFromEnv(),
-          googleOAuthService,
           voiceService: createVoiceServiceFromEnv(),
-          message: update.message,
-        });
-      }
+        }),
+      });
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
