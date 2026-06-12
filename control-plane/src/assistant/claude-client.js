@@ -30,6 +30,15 @@ export class MissingClaudeClient {
     };
   }
 
+  async sendMessages() {
+    return {
+      content: [{ type: "text", text: "Claude API key is not configured." }],
+      stop_reason: "end_turn",
+      model: this.model,
+      usage: null,
+    };
+  }
+
   async healthCheck() {
     return {
       ok: false,
@@ -56,10 +65,46 @@ export class HttpClaudeClient {
   }
 
   async complete({ system, user, maxTokens = 900, model }) {
+    const requestModel = model || this.model;
+    const payload = await this.sendMessages({
+      system,
+      messages: [{ role: "user", content: user }],
+      maxTokens,
+      model: requestModel,
+    });
+    return {
+      text: readTextContent(payload),
+      model: payload.model || requestModel,
+      usage: normalizeUsage(payload.usage),
+      stopReason: payload.stop_reason || null,
+      configured: true,
+    };
+  }
+
+  /**
+   * Low-level Messages API call supporting multi-turn conversations and
+   * tool use. Returns the raw payload so callers (the agent loop) can read
+   * content blocks (text + tool_use) and stop_reason directly.
+   */
+  async sendMessages({ system, messages, tools, toolChoice, maxTokens = 1500, model }) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     const requestModel = model || this.model;
     try {
+      const body = {
+        model: requestModel,
+        max_tokens: maxTokens,
+        messages,
+      };
+      if (system) {
+        body.system = system;
+      }
+      if (Array.isArray(tools) && tools.length > 0) {
+        body.tools = tools;
+      }
+      if (toolChoice) {
+        body.tool_choice = toolChoice;
+      }
       const response = await fetch(this.endpoint, {
         method: "POST",
         signal: controller.signal,
@@ -69,12 +114,7 @@ export class HttpClaudeClient {
           "x-api-key": this.apiKey,
           "anthropic-version": DEFAULT_ANTHROPIC_VERSION,
         },
-        body: JSON.stringify({
-          model: requestModel,
-          max_tokens: maxTokens,
-          system,
-          messages: [{ role: "user", content: user }],
-        }),
+        body: JSON.stringify(body),
       });
 
       const text = await response.text();
@@ -87,14 +127,7 @@ export class HttpClaudeClient {
           requestId: response.headers.get("request-id") || response.headers.get("x-request-id") || null,
         });
       }
-
-      return {
-        text: readTextContent(payload),
-        model: payload.model || requestModel,
-        usage: normalizeUsage(payload.usage),
-        stopReason: payload.stop_reason || null,
-        configured: true,
-      };
+      return payload;
     } finally {
       clearTimeout(timer);
     }
@@ -145,6 +178,13 @@ export class ClaudeApiError extends Error {
     this.type = type;
     this.requestId = requestId;
   }
+}
+
+export function extractToolUseBlocks(payload) {
+  const blocks = Array.isArray(payload?.content) ? payload.content : [];
+  return blocks
+    .filter((block) => block?.type === "tool_use")
+    .map((block) => ({ id: block.id, name: block.name, input: block.input || {} }));
 }
 
 function readTextContent(payload) {

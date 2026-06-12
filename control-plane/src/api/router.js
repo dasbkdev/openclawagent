@@ -31,6 +31,7 @@ import {
   resolveAssistantLoop,
 } from "../domain/assistant-open-loops.js";
 import { buildKickidlerActivitySummary } from "../domain/reports.js";
+import { runAgentTask, makeDeviceCommandRunner, resolveAgentTaskDevice } from "../assistant/agent-loop.js";
 import {
   buildTokenUsageSummary,
   recordTokenUsageEvents,
@@ -674,6 +675,29 @@ export function createRouter({
         return;
       }
 
+      if (request.method === "POST" && url.pathname === "/api/v1/agent/task") {
+        const body = await readJsonBody(request);
+        const state = await store.load();
+        const actor = requireActor(state, request);
+        const device = resolveAgentTaskDevice(state, actor, body);
+        const claudeClient = resolveClaudeClient();
+        if (!claudeClient) {
+          throw validation("Claude client is not enabled on this server");
+        }
+        const enqueueAndWait = makeDeviceCommandRunner({ store, actor, device });
+        const outcome = await runAgentTask({
+          store,
+          claudeClient,
+          actor,
+          device,
+          instruction: body.instruction || body.text,
+          enqueueAndWait,
+          maxSteps: Number(body.maxSteps) || undefined,
+        });
+        sendJson(response, 200, { ok: true, data: outcome });
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/api/v1/device-commands") {
         const body = await readJsonBody(request);
         const result = await store.update((state) => {
@@ -1266,3 +1290,4 @@ export function requireActor(state, request) {
   }
   return actor;
 }
+

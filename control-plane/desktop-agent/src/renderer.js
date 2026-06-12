@@ -17,6 +17,7 @@ const chatForm = document.getElementById("chatForm");
 const question = document.getElementById("question");
 const askButton = document.getElementById("askButton");
 const messages = document.getElementById("messages");
+const actionsList = document.getElementById("actionsList");
 
 let currentStatus = null;
 
@@ -31,6 +32,40 @@ async function init() {
     currentStatus = status;
     renderStatus(status);
   });
+  if (window.starlabAgent.recentActions) {
+    renderActions(await window.starlabAgent.recentActions());
+  }
+  if (window.starlabAgent.onRecentActions) {
+    window.starlabAgent.onRecentActions((actions) => renderActions(actions));
+  }
+}
+
+function renderActions(actions) {
+  if (!actionsList) {
+    return;
+  }
+  const list = Array.isArray(actions) ? actions : [];
+  if (!list.length) {
+    actionsList.innerHTML = '<li id="actionsEmpty" style="color:#8a94a6;">Действий ещё не было</li>';
+    return;
+  }
+  actionsList.innerHTML = list
+    .map((action) => {
+      const color = action.status === "succeeded" ? "#0e7c66" : action.status === "rejected" ? "#b06a00" : "#b42318";
+      const time = formatDate(action.at);
+      const detail = action.error ? ` — ${escapeText(action.error)}` : "";
+      return `<li style="padding:4px 0;border-bottom:1px solid #eef2f7;"><span style="color:${color};font-weight:600;">${escapeText(
+        action.status,
+      )}</span> ${escapeText(action.type)}${detail}<div style="color:#8a94a6;">${escapeText(time)}</div></li>`;
+    })
+    .join("");
+}
+
+function escapeText(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 activationForm.addEventListener("submit", async (event) => {

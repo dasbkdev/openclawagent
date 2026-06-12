@@ -8474,3 +8474,63 @@ Two root causes:
   data BEFORE store.update and apply state changes in a short mutation
   (daily-assistant-reporter, platrum/bitrix report paths). Tracked for the
   Postgres migration milestone.
+
+## 2026-06-12 - Desktop agent stages 2 & 3: tools + planner (Claude multi-agent)
+
+Built in one sprint via orchestration: Architect (Fable 5) did stage 3 +
+shared infra; an Opus sub-agent did stage 2 (executor) on isolated files.
+
+### Stage 2 - cross-platform device executor ("hands")
+
+- Server already had the command queue (create/claim/result) and capability
+  gating; what was missing was a CLIENT that claims and runs commands.
+  Before this, no client executed anything.
+- New `src/agent-tools/executor.js` (zero-dep, node:* only):
+  `supportedActionsForPlatform(platform)`, `executeAction({type,args,...})`.
+- Action types expanded in `src/domain/device-agents.js` to 27, incl.
+  run_script, notify, read_file/write_file, list_dir, search_files,
+  make_dir, move_path, delete_path, media_control, set_volume, system_info.
+  `SENSITIVE_DEVICE_ACTION_TYPES` + `isSensitiveDeviceAction()` added.
+- Implementations: win32 via PowerShell, darwin via osascript+shell, linux
+  best-effort (xdotool/wmctrl/xclip/scrot/notify-send). File ops via fs work
+  everywhere. screenshot returns base64 (size-capped).
+- Safety: sensitive actions require a confirmCallback. CLI honors
+  `DEVICE_AGENT_ALLOW_SENSITIVE`; Electron pops a native confirm dialog so a
+  human authorizes every dangerous action. exec timeouts, output caps,
+  argument escaping.
+- Clients now advertise real capabilities
+  (`["heartbeat","command-polling",...supported]`) so the server queues only
+  executable commands. CLI `device-agent.js` + Electron `main.cjs` both run a
+  command-polling loop; desktop app shows an action log. Version 0.2.0.
+- NOT implemented (needs native modules): mouse_click, ocr_screen ->
+  report `unsupported`. set_volume on Windows is approximate.
+
+### Stage 3 - server-side planner ("brain")
+
+- `claude-client.js`: new `sendMessages()` (multi-turn + tool_use),
+  `extractToolUseBlocks()`. Claude timeout already 120s.
+- New `src/assistant/agent-loop.js`: `runAgentTask()` runs a tool-use loop -
+  Claude plans, calls a device tool, the loop enqueues the command and waits
+  (up to 90s) for the executor's real result, feeds it back, repeats until
+  `finish_task`/end_turn/maxSteps. 21 tool schemas exposed (filtered by the
+  target device's capabilities). `makeDeviceCommandRunner()` enqueues+waits;
+  `resolveAgentTaskDevice()` picks the actor's device. Token usage + audit
+  recorded; sensitive steps flagged.
+- Endpoint `POST /api/v1/agent/task`; Telegram `/task <instruction>` with a
+  per-step report (✅/🚫/⚠️/❌) and final summary.
+
+### Verification
+
+- Local + server `npm test`: 196 passed, 0 failed (+19 executor, +6 planner).
+- Deployed; services active; /health ok; journal clean; `/api/v1/device-actions`
+  returns 27 types in production.
+- Desktop-agent (Electron) changes ride CI (build-desktop-agents.yml) to
+  produce new signed-later 0.2.0 .exe/.dmg; server got control-plane only.
+
+### How it works end to end
+
+Employee (or manager) sends `/task собери все xlsx из Загрузок в архив`.
+Server planner asks Claude, which calls search_files -> read results ->
+make_dir/run_script (employee confirms on the desktop) -> notify. Each step
+runs on the real machine through the command queue; progress streams to
+Telegram.

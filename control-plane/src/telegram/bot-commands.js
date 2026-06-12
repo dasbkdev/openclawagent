@@ -5,6 +5,7 @@ export const TELEGRAM_BOT_COMMANDS = Object.freeze([
   { command: "users", description: "доступные сотрудники" },
   { command: "agents", description: "агенты устройств сотрудников" },
   { command: "device", description: "команда локальному OpenClaw" },
+  { command: "task", description: "поручить агенту многошаговую задачу на ПК" },
   { command: "projects", description: "доступные проекты" },
   { command: "today", description: "мой план и прогресс" },
   { command: "plan", description: "задать план дня" },

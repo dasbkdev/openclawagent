@@ -3,9 +3,19 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
+import { executeAction, supportedActionsForPlatform } from "./agent-tools/executor.js";
 
-const AGENT_VERSION = "0.1.0";
+const AGENT_VERSION = "0.2.0";
 const DEFAULT_INTERVAL_SECONDS = 60;
+const COMMAND_POLL_INTERVAL_MS = 8000;
+
+function deviceCapabilities() {
+  return Array.from(new Set(["heartbeat", "command-polling", ...supportedActionsForPlatform(process.platform)]));
+}
+
+function allowSensitive() {
+  return String(process.env.DEVICE_AGENT_ALLOW_SENSITIVE || "").toLowerCase() === "true";
+}
 
 main().catch((error) => {
   console.error(`[device-agent] fatal: ${error?.message || error}`);
@@ -38,19 +48,100 @@ async function main() {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
 
+  const canPoll = config.capabilities.includes("command-polling") && Boolean(config.token);
+  let lastHeartbeatAt = 0;
+
   while (!stopped) {
-    try {
-      const result = await sendHeartbeat(config);
-      console.log(
-        `[device-agent] heartbeat ok status=${result.agent?.status || "unknown"} count=${
-          result.agent?.heartbeatCount || "n/a"
-        }`,
-      );
-    } catch (error) {
-      console.error(`[device-agent] heartbeat failed: ${error?.message || error}`);
+    const nowMs = Date.now();
+    if (nowMs - lastHeartbeatAt >= config.intervalSeconds * 1000) {
+      lastHeartbeatAt = nowMs;
+      try {
+        const result = await sendHeartbeat(config);
+        console.log(
+          `[device-agent] heartbeat ok status=${result.agent?.status || "unknown"} count=${
+            result.agent?.heartbeatCount || "n/a"
+          }`,
+        );
+      } catch (error) {
+        console.error(`[device-agent] heartbeat failed: ${error?.message || error}`);
+      }
     }
-    await sleep(config.intervalSeconds * 1000);
+
+    if (canPoll) {
+      try {
+        await pollAndExecuteCommands(config);
+      } catch (error) {
+        console.error(`[device-agent] command poll failed: ${error?.message || error}`);
+      }
+    }
+
+    await sleep(COMMAND_POLL_INTERVAL_MS);
   }
+}
+
+async function pollAndExecuteCommands(config) {
+  const commands = await claimCommands(config);
+  if (!commands.length) {
+    return;
+  }
+  const sensitiveAllowed = allowSensitive();
+  for (const command of commands) {
+    let outcome;
+    try {
+      outcome = await executeAction({
+        type: command.type,
+        args: command.args || {},
+        platform: process.platform,
+        confirmCallback: () => sensitiveAllowed,
+      });
+    } catch (error) {
+      outcome = { status: "failed", error: error?.message || String(error) };
+    }
+    console.log(`[device-agent] executed ${command.type} -> ${outcome.status}`);
+    try {
+      await reportResult(config, command.id, outcome);
+    } catch (error) {
+      console.error(`[device-agent] result post failed for ${command.id}: ${error?.message || error}`);
+    }
+  }
+}
+
+async function claimCommands(config) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.heartbeatTimeoutMs);
+  const url = `${config.controlPlaneUrl}/api/v1/device-agents/commands?deviceId=${encodeURIComponent(config.deviceId)}`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: buildHeaders(config),
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error?.message || `HTTP ${response.status}`);
+  }
+  return payload.data?.commands || [];
+}
+
+async function reportResult(config, commandId, outcome) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.heartbeatTimeoutMs);
+  const url = `${config.controlPlaneUrl}/api/v1/device-agents/commands/${encodeURIComponent(commandId)}/result`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: buildHeaders(config),
+    signal: controller.signal,
+    body: JSON.stringify({
+      deviceId: config.deviceId,
+      status: outcome.status,
+      result: outcome.result ?? null,
+      error: outcome.error ?? null,
+    }),
+  }).finally(() => clearTimeout(timer));
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok) {
+    throw new Error(payload?.error?.message || `HTTP ${response.status}`);
+  }
+  return payload.data;
 }
 
 function loadConfig(env = process.env) {
@@ -79,7 +170,7 @@ function loadConfig(env = process.env) {
     basicAuthUsername: trim(env.CONTROL_PLANE_BASIC_AUTH_USERNAME),
     basicAuthPassword: trim(env.CONTROL_PLANE_BASIC_AUTH_PASSWORD),
     labels: parseJsonObject(env.DEVICE_AGENT_LABELS),
-    capabilities: parseList(env.DEVICE_AGENT_CAPABILITIES || "heartbeat"),
+    capabilities: deviceCapabilities(),
   };
 }
 
@@ -164,7 +255,7 @@ async function activateWithServer({ controlPlaneUrl, registrationCode }) {
       arch: os.arch(),
       osRelease: os.release(),
       agentVersion: AGENT_VERSION,
-      capabilities: ["heartbeat", "local-app"],
+      capabilities: Array.from(new Set(["heartbeat", "local-app", ...deviceCapabilities()])),
     }),
   });
   const payload = await response.json().catch(() => null);
@@ -208,7 +299,6 @@ function writeActivationEnv(envFile, { controlPlaneUrl, activation }) {
     `DEVICE_AGENT_DISPLAY_NAME=${escapeEnvValue(agent.displayName || `${user.displayName || user.id} on ${os.hostname()}`)}`,
     `DEVICE_AGENT_TOKEN=${activation.deviceToken}`,
     "DEVICE_AGENT_INTERVAL_SECONDS=60",
-    'DEVICE_AGENT_CAPABILITIES=heartbeat,local-app',
   ];
   fs.writeFileSync(envFile, `${lines.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
 }
@@ -511,13 +601,6 @@ function parseJsonObject(value) {
   } catch {
     return {};
   }
-}
-
-function parseList(value) {
-  return String(value || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function sleep(ms) {

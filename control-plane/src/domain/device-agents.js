@@ -25,7 +25,39 @@ export const DEVICE_ACTION_TYPES = Object.freeze([
   "ocr_screen",
   "play_youtube",
   "openclaw_prompt",
+  // Extended desktop toolset (level 2). run_script is the powerful catch-all
+  // (PowerShell on Windows, AppleScript/shell on macOS, shell on Linux) and
+  // is gated by the run_script capability plus the device-side confirm guard.
+  "run_script",
+  "notify",
+  "read_file",
+  "write_file",
+  "list_dir",
+  "search_files",
+  "move_path",
+  "delete_path",
+  "make_dir",
+  "media_control",
+  "set_volume",
+  "system_info",
 ]);
+
+// Actions that can mutate or exfiltrate the user's machine. The device-side
+// executor must require explicit confirmation (or an allowlist) before
+// running these; the server marks them so the planner/agent loop can ask.
+export const SENSITIVE_DEVICE_ACTION_TYPES = Object.freeze([
+  "run_script",
+  "write_file",
+  "move_path",
+  "delete_path",
+  "keyboard_type",
+  "hotkey",
+  "mouse_click",
+]);
+
+export function isSensitiveDeviceAction(type) {
+  return SENSITIVE_DEVICE_ACTION_TYPES.includes(type);
+}
 
 export function activateDeviceAgent(state, payload, { remoteAddress, now = new Date() } = {}) {
   if (!Array.isArray(state.deviceAgents)) {

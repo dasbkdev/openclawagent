@@ -34,6 +34,7 @@ test("Telegram command menu exposes only useful product commands", () => {
     "users",
     "agents",
     "device",
+    "task",
     "projects",
     "today",
     "plan",

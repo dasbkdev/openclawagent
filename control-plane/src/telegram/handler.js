@@ -31,6 +31,7 @@ import {
   reissueInviteCode,
 } from "../domain/invite-codes.js";
 import { autoResolveUserMappings } from "../domain/external-mapping.js";
+import { runAgentTask, makeDeviceCommandRunner, resolveAgentTaskDevice } from "../assistant/agent-loop.js";
 import {
   formatNaturalDeviceCommandQueued,
   tryCreateNaturalDeviceCommand,
@@ -178,6 +179,17 @@ export async function handleTelegramMessage({
           chatId,
           telegramUserId,
           args: command.args,
+        });
+        return;
+
+      case "task":
+        await runAgentTaskCommand({
+          store,
+          telegram,
+          chatId,
+          telegramUserId,
+          claudeClient,
+          instruction: command.args.join(" "),
         });
         return;
 
@@ -736,6 +748,76 @@ async function recoverOwnerRegistrationCode({ store, telegram, chatId, telegramU
       ].join("\n"),
     });
   }
+}
+
+async function runAgentTaskCommand({ store, telegram, chatId, telegramUserId, claudeClient, instruction }) {
+  const trimmed = String(instruction || "").trim();
+  if (!trimmed) {
+    await telegram.sendMessage({
+      chatId,
+      text: [
+        title("Поручить задачу агенту"),
+        "Опиши задачу текстом после команды. Пример:",
+        code("/task собери все xlsx из папки Загрузки в архив на рабочем столе"),
+        "",
+        "Агент выполнит её по шагам на твоём компьютере. Действия, меняющие файлы или запускающие скрипты, спросят подтверждение на устройстве.",
+      ].join("\n"),
+    });
+    return;
+  }
+
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  let device;
+  try {
+    device = resolveAgentTaskDevice(state, actor, {});
+  } catch (error) {
+    await telegram.sendMessage({ chatId, text: formatTelegramError(error) });
+    return;
+  }
+
+  await telegram.sendMessage({
+    chatId,
+    text: [title("Принял задачу"), kv("Устройство", device.displayName || device.deviceId), "Работаю по шагам, это может занять до минуты…"].join("\n"),
+  });
+
+  const enqueueAndWait = makeDeviceCommandRunner({ store, actor, device });
+  const outcome = await runAgentTask({
+    store,
+    claudeClient,
+    actor,
+    device,
+    instruction: trimmed,
+    enqueueAndWait,
+  });
+
+  const lines = [title(outcome.ok ? "Задача выполнена" : "Задача завершена")];
+  if (outcome.steps?.length) {
+    lines.push("", subtitle("Шаги"));
+    for (const step of outcome.steps) {
+      lines.push(`${stepIcon(step.status)} ${escapeHtml(step.type)}${step.sensitive ? " 🔒" : ""} — ${escapeHtml(stepStatusLabel(step.status))}`);
+    }
+  }
+  lines.push("", escapeHtml(outcome.summary || ""));
+  await sendLongMessage({ telegram, chatId, text: lines.join("\n") });
+}
+
+function stepIcon(status) {
+  if (status === "succeeded") return "✅";
+  if (status === "rejected") return "🚫";
+  if (status === "unsupported") return "⚠️";
+  return "❌";
+}
+
+function stepStatusLabel(status) {
+  const map = {
+    succeeded: "выполнено",
+    failed: "ошибка",
+    rejected: "отклонено сотрудником",
+    unsupported: "не поддерживается",
+    expired: "истекло время",
+  };
+  return map[status] || status;
 }
 
 async function sendDeviceCommand({ store, telegram, chatId, telegramUserId, args }) {
