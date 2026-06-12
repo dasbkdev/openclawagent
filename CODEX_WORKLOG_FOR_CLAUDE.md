@@ -8419,3 +8419,18 @@ accounts. Verified: Platrum returns 1 task, Bitrix returns 30 tasks.
 - Services restarted, active, /health ok, journal clean.
 - Bitrix test "skips lookup when mapping missing" updated: placeholder
   names produce no search tokens (no network); real names auto-resolve.
+
+## 2026-06-12 - u-pm-2 mapped to Aizirek
+
+User confirmed PM2 = Aizirek. Production state updated (backup
+`control-plane.json.pm2-fix-backup-*`):
+
+- displayName: "Айзирек Аликенова" (normalized whitespace from Bitrix)
+- platrumUserId 9 (aisyy), bitrixUserId 101
+- kickidlerEmployeeId 29 ("Айзирек пм"): of the two Metricon candidate
+  records, 29 reported real activity over the last 7 days (~4.2h active),
+  while 75 ("aizirek1@gmail.com") reported zero - 75 looks like an unused
+  duplicate.
+
+Verified live: Platrum 1 task, Bitrix 1 task (ДТМ, completed) flow for her.
+Audit event `user.mapping.manual_fix` recorded. No code changes.
