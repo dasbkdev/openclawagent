@@ -1,0 +1,59 @@
+{
+  "name": "@openclaw/starlab-windows-agent",
+  "version": "2026.6.7",
+  "private": true,
+  "description": "Windows desktop app target for the Starlab OpenClaw employee agent.",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build:dir": "electron-builder --dir --x64",
+    "build:win": "electron-builder --win nsis --x64",
+    "build:linux": "electron-builder --linux deb --x64"
+  },
+  "build": {
+    "appId": "com.starlab.openclaw.agent",
+    "productName": "Starlab OpenClaw Agent",
+    "copyright": "Copyright (c) 2026 Starlab",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "forceCodeSigning": false,
+      "requestedExecutionLevel": "requireAdministrator",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "artifactName": "starlab-openclaw-agent-windows.exe",
+      "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Starlab OpenClaw Agent"
+    },
+    "deb": {
+      "artifactName": "starlab-openclaw-agent-linux-amd64.deb",
+      "category": "Office"
+    },
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "maintainer": "Starlab",
+      "category": "Office"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  }
+}

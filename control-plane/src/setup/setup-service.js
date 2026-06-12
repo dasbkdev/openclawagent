@@ -8,24 +8,51 @@ import { SecretStore } from "./secret-store.js";
 const SECRET_NAMES = [
   "telegramBotToken",
   "kickidlerAccessToken",
+  "kickidlerRefreshToken",
+  "kickidlerUsername",
+  "kickidlerPassword",
+  "platrumUsername",
+  "platrumPassword",
   "bitrixWebhookUrl",
   "claudeApiKey",
   "googleOAuthClientJson",
   "tokenUsageIngestToken",
+  "elevenLabsApiKey",
+  "sttApiKey",
+  "yougileApiKey",
 ];
 
 const SETTING_ENV_MAP = {
   bootstrapOwnerTelegramId: "BOOTSTRAP_OWNER_TELEGRAM_ID",
   kickidlerBaseUrl: ["METRICON_BASE_URL", "KICKIDLER_BASE_URL"],
+  platrumBaseUrl: "PLATRUM_BASE_URL",
   tokenReportRecipientTelegramId: "TOKEN_USAGE_REPORT_TELEGRAM_ID",
+  voiceAssistantEnabled: "VOICE_ASSISTANT_ENABLED",
+  voiceReplyMode: "VOICE_REPLY_MODE",
+  sttProvider: "STT_PROVIDER",
+  sttModel: "STT_MODEL",
+  sttLanguageCode: "STT_LANGUAGE_CODE",
+  elevenLabsVoiceId: "ELEVENLABS_VOICE_ID",
+  elevenLabsTtsModel: "ELEVENLABS_TTS_MODEL",
+  elevenLabsOutputFormat: "ELEVENLABS_OUTPUT_FORMAT",
+  yougileEnabled: "YOUGILE_ENABLED",
+  yougileBaseUrl: "YOUGILE_BASE_URL",
 };
 
 const SECRET_ENV_MAP = {
   telegramBotToken: ["TELEGRAM_BOT_TOKEN"],
   kickidlerAccessToken: ["METRICON_ACCESS_TOKEN", "KICKIDLER_ACCESS_TOKEN"],
+  kickidlerRefreshToken: ["METRICON_REFRESH_TOKEN", "KICKIDLER_REFRESH_TOKEN"],
+  kickidlerUsername: ["METRICON_USERNAME", "KICKIDLER_USERNAME", "METRICON_EMAIL", "KICKIDLER_EMAIL"],
+  kickidlerPassword: ["METRICON_PASSWORD", "KICKIDLER_PASSWORD"],
+  platrumUsername: ["PLATRUM_USERNAME"],
+  platrumPassword: ["PLATRUM_PASSWORD"],
   bitrixWebhookUrl: ["BITRIX_WEBHOOK_URL"],
   claudeApiKey: ["CLAUDE_API_KEY", "ANTHROPIC_API_KEY"],
   tokenUsageIngestToken: ["TOKEN_USAGE_INGEST_TOKEN"],
+  elevenLabsApiKey: ["ELEVENLABS_API_KEY"],
+  sttApiKey: ["STT_API_KEY"],
+  yougileApiKey: ["YOUGILE_API_KEY"],
 };
 
 const DEFAULT_TOKEN_REPORT_RECIPIENT_TELEGRAM_ID = "984834133";
@@ -70,6 +97,17 @@ export class SetupService {
       await this.secretStore.deleteSecret(name);
     }
 
+    await this.applyToEnv(process.env, { overwrite: true });
+    return await this.status();
+  }
+
+  async saveMetriconTokens({ accessToken, refreshToken }) {
+    if (accessToken) {
+      await this.secretStore.writeSecret("kickidlerAccessToken", accessToken);
+    }
+    if (refreshToken) {
+      await this.secretStore.writeSecret("kickidlerRefreshToken", refreshToken);
+    }
     await this.applyToEnv(process.env, { overwrite: true });
     return await this.status();
   }
@@ -157,10 +195,27 @@ function normalizeSetupPayload(payload) {
   const settings = {};
   copyOptionalString(payload, settings, "bootstrapOwnerTelegramId");
   copyOptionalString(payload, settings, "kickidlerBaseUrl");
+  copyOptionalString(payload, settings, "platrumBaseUrl");
   copyOptionalString(payload, settings, "tokenReportRecipientTelegramId");
+  copyOptionalString(payload, settings, "voiceAssistantEnabled");
+  copyOptionalString(payload, settings, "voiceReplyMode");
+  copyOptionalString(payload, settings, "sttProvider");
+  copyOptionalString(payload, settings, "sttModel");
+  copyOptionalString(payload, settings, "sttLanguageCode");
+  copyOptionalString(payload, settings, "elevenLabsVoiceId");
+  copyOptionalString(payload, settings, "elevenLabsTtsModel");
+  copyOptionalString(payload, settings, "elevenLabsOutputFormat");
+  copyOptionalString(payload, settings, "yougileEnabled");
+  copyOptionalString(payload, settings, "yougileBaseUrl");
 
   if (settings.kickidlerBaseUrl && !isHttpUrl(settings.kickidlerBaseUrl)) {
     throw validation("kickidlerBaseUrl must be a valid http(s) URL");
+  }
+  if (settings.platrumBaseUrl && !isHttpUrl(settings.platrumBaseUrl)) {
+    throw validation("platrumBaseUrl must be a valid http(s) URL");
+  }
+  if (settings.yougileBaseUrl && !isHttpUrl(settings.yougileBaseUrl)) {
+    throw validation("yougileBaseUrl must be a valid http(s) URL");
   }
   if (
     settings.tokenReportRecipientTelegramId &&
@@ -168,14 +223,34 @@ function normalizeSetupPayload(payload) {
   ) {
     throw validation("tokenReportRecipientTelegramId must be a numeric Telegram id");
   }
+  if (settings.voiceAssistantEnabled && !["true", "false"].includes(settings.voiceAssistantEnabled)) {
+    throw validation("voiceAssistantEnabled must be true or false");
+  }
+  if (settings.voiceReplyMode && !["on_request", "always_text", "always_voice"].includes(settings.voiceReplyMode)) {
+    throw validation("voiceReplyMode must be on_request, always_text, or always_voice");
+  }
+  if (settings.sttProvider && !["elevenlabs", "openai"].includes(settings.sttProvider)) {
+    throw validation("sttProvider must be elevenlabs or openai");
+  }
+  if (settings.yougileEnabled && !["true", "false"].includes(settings.yougileEnabled)) {
+    throw validation("yougileEnabled must be true or false");
+  }
 
   const secrets = {};
   for (const name of [
     "telegramBotToken",
     "kickidlerAccessToken",
+    "kickidlerRefreshToken",
+    "kickidlerUsername",
+    "kickidlerPassword",
+    "platrumUsername",
+    "platrumPassword",
     "bitrixWebhookUrl",
     "claudeApiKey",
     "tokenUsageIngestToken",
+    "elevenLabsApiKey",
+    "sttApiKey",
+    "yougileApiKey",
   ]) {
     copyOptionalString(payload, secrets, name);
   }
@@ -208,6 +283,16 @@ function copyOptionalString(from, to, key) {
 function effectiveSettings(settings = {}) {
   return {
     tokenReportRecipientTelegramId: DEFAULT_TOKEN_REPORT_RECIPIENT_TELEGRAM_ID,
+    voiceAssistantEnabled: "true",
+    voiceReplyMode: "on_request",
+    sttProvider: "elevenlabs",
+    sttModel: "scribe_v2",
+    sttLanguageCode: "",
+    elevenLabsVoiceId: "",
+    elevenLabsTtsModel: "eleven_multilingual_v2",
+    elevenLabsOutputFormat: "mp3_44100_128",
+    yougileEnabled: "false",
+    yougileBaseUrl: "https://yougile.com/api-v2",
     ...settings,
   };
 }
@@ -240,10 +325,14 @@ function isConfigured({ settings, secrets }) {
   return Boolean(
     settings?.bootstrapOwnerTelegramId &&
       settings?.kickidlerBaseUrl &&
+      settings?.platrumBaseUrl &&
       secrets.telegramBotToken?.configured &&
       secrets.claudeApiKey?.configured &&
       secrets.googleOAuthClientJson?.configured &&
-      secrets.kickidlerAccessToken?.configured &&
-      secrets.bitrixWebhookUrl?.configured,
+      (secrets.kickidlerAccessToken?.configured ||
+        secrets.kickidlerRefreshToken?.configured ||
+        (secrets.kickidlerUsername?.configured && secrets.kickidlerPassword?.configured)) &&
+      secrets.platrumUsername?.configured &&
+      secrets.platrumPassword?.configured,
   );
 }

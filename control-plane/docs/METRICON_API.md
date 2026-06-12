@@ -70,8 +70,9 @@ GET  /api/v1/screenshots/session/{sessionId}/timeline
 The control plane now accepts Metricon env names:
 
 ```text
-METRICON_BASE_URL=http://85.239.49.208:8080
+METRICON_BASE_URL=http://metriconapp.com
 METRICON_ACCESS_TOKEN=<saved through setup wizard>
+METRICON_REFRESH_TOKEN=<saved through setup wizard, preferred>
 ```
 
 Legacy names are still accepted:
@@ -79,7 +80,13 @@ Legacy names are still accepted:
 ```text
 KICKIDLER_BASE_URL=
 KICKIDLER_ACCESS_TOKEN=
+KICKIDLER_REFRESH_TOKEN=
 ```
+
+Metricon frontend at `http://metriconapp.com/` uses relative API prefix
+`/api/v1/`, so `METRICON_BASE_URL=http://metriconapp.com` is also valid. Access
+tokens expire quickly; the connector refreshes them through
+`POST /api/v1/auth/refresh` when a refresh token is configured.
 
 The new preferred report endpoint alias is:
 

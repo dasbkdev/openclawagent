@@ -131,7 +131,7 @@ function Ensure-EnvFile {
 HOST=127.0.0.1
 PORT=3099
 BOOTSTRAP_OWNER_TELEGRAM_ID=dev-nikolay
-KICKIDLER_BASE_URL=
+METRICON_BASE_URL=http://metriconapp.com
 CONTROL_PLANE_DATA_FILE=$TargetDataDir\control-plane.json
 CONTROL_PLANE_CONFIG_DIR=$TargetDataDir
 "@ | Set-Content -Encoding UTF8 -Path $envFile

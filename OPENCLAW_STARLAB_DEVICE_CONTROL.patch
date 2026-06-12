@@ -1,0 +1,2731 @@
+﻿diff --git a/.github/workflows/starlab-desktop-build.yml b/.github/workflows/starlab-desktop-build.yml
+new file mode 100644
+index 0000000000..9b9a2aaccb
+--- /dev/null
++++ b/.github/workflows/starlab-desktop-build.yml
+@@ -0,0 +1,73 @@
++name: Starlab OpenClaw Desktop Builds
++
++on:
++  workflow_dispatch:
++  push:
++    branches:
++      - server
++      - develop
++      - main
++    paths:
++      - "apps/macos/**"
++      - "apps/windows/**"
++      - "scripts/package-starlab-mac-dist.sh"
++      - "scripts/package-mac-app.sh"
++      - "scripts/package-mac-dist.sh"
++      - "package.json"
++
++jobs:
++  windows:
++    name: Windows installer
++    runs-on: windows-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: "24"
++      - name: Build Windows app
++        shell: powershell
++        run: |
++          cd apps/windows
++          npm install
++          npm run build:win
++      - uses: actions/upload-artifact@v4
++        with:
++          name: starlab-openclaw-agent-windows
++          path: apps/windows/dist/starlab-openclaw-agent-windows.exe
++
++  macos:
++    name: macOS DMG
++    runs-on: macos-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: "24"
++      - uses: pnpm/action-setup@v4
++        with:
++          version: "11.2.2"
++      - name: Build macOS app and DMG
++        run: |
++          SKIP_NOTARIZE=1 ALLOW_ADHOC_SIGNING=1 pnpm starlab:mac:package
++      - uses: actions/upload-artifact@v4
++        with:
++          name: starlab-openclaw-agent-macos
++          path: dist/starlab-openclaw-agent-macos-universal.dmg
++
++  linux:
++    name: Linux Debian package
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: "24"
++      - name: Build Linux app
++        run: |
++          cd apps/windows
++          npm install
++          npm run build:linux
++      - uses: actions/upload-artifact@v4
++        with:
++          name: starlab-openclaw-agent-linux
++          path: apps/windows/dist/starlab-openclaw-agent-linux-amd64.deb
+diff --git a/apps/macos/Sources/OpenClaw/AppNavigationActions.swift b/apps/macos/Sources/OpenClaw/AppNavigationActions.swift
+index e41a566032..21c5434d35 100644
+--- a/apps/macos/Sources/OpenClaw/AppNavigationActions.swift
++++ b/apps/macos/Sources/OpenClaw/AppNavigationActions.swift
+@@ -27,6 +27,11 @@ enum AppNavigationActions {
+         }
+     }
+ 
++    static func openStarlabAgent() {
++        NSApp.activate(ignoringOtherApps: true)
++        StarlabAgentWindowController.shared.show()
++    }
++
+     static func toggleCanvas() {
+         NSApp.activate(ignoringOtherApps: true)
+         Task { @MainActor in
+diff --git a/apps/macos/Sources/OpenClaw/MenuBar.swift b/apps/macos/Sources/OpenClaw/MenuBar.swift
+index 82b0257ec3..1184692d29 100644
+--- a/apps/macos/Sources/OpenClaw/MenuBar.swift
++++ b/apps/macos/Sources/OpenClaw/MenuBar.swift
+@@ -289,6 +289,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
+             title: "Open Chat",
+             systemImage: "bubble.left.and.bubble.right",
+             action: #selector(self.openChatFromDockMenu(_:))))
++        menu.addItem(self.dockMenuItem(
++            title: "Open Starlab Agent",
++            systemImage: "person.badge.key.fill",
++            action: #selector(self.openStarlabAgentFromDockMenu(_:))))
+         let canvasTitle = AppStateStore.shared.canvasPanelVisible ? "Close Canvas" : "Open Canvas"
+         let canvasItem = self.dockMenuItem(
+             title: canvasTitle,
+@@ -321,6 +325,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
+         AppNavigationActions.openChat()
+     }
+ 
++    @objc
++    private func openStarlabAgentFromDockMenu(_: Any?) {
++        AppNavigationActions.openStarlabAgent()
++    }
++
+     @objc
+     private func toggleCanvasFromDockMenu(_: Any?) {
+         AppNavigationActions.toggleCanvas()
+@@ -361,7 +370,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
+         Task { await HealthStore.shared.refresh(onDemand: true) }
+         Task { await PortGuardian.shared.sweep(mode: AppStateStore.shared.connectionMode) }
+         Task { await PeekabooBridgeHostCoordinator.shared.setEnabled(AppStateStore.shared.peekabooBridgeEnabled) }
+-        self.scheduleFirstRunOnboardingIfNeeded()
++        if StarlabAgentClient.shared.isActivated {
++            StarlabAgentClient.shared.startHeartbeat()
++            StarlabAgentClient.shared.startCommandPolling()
++            OnboardingController.markComplete()
++            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
++                StarlabAgentWindowController.shared.show()
++            }
++        } else {
++            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
++                StarlabAgentWindowController.shared.show()
++            }
++        }
+         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+             CLIInstallPrompter.shared.checkAndPromptIfNeeded(reason: "launch")
+         }
+diff --git a/apps/macos/Sources/OpenClaw/MenuContentView.swift b/apps/macos/Sources/OpenClaw/MenuContentView.swift
+index b4d4fa0272..938f8fab0d 100644
+--- a/apps/macos/Sources/OpenClaw/MenuContentView.swift
++++ b/apps/macos/Sources/OpenClaw/MenuContentView.swift
+@@ -120,6 +120,11 @@ struct MenuContent: View {
+             } label: {
+                 Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
+             }
++            Button {
++                AppNavigationActions.openStarlabAgent()
++            } label: {
++                Label("Starlab Agent", systemImage: "person.badge.key.fill")
++            }
+             if self.state.canvasEnabled {
+                 Button {
+                     AppNavigationActions.toggleCanvas()
+diff --git a/apps/macos/Sources/OpenClaw/OnboardingWizard.swift b/apps/macos/Sources/OpenClaw/OnboardingWizard.swift
+index 0b6df7ddda..061e9552bb 100644
+--- a/apps/macos/Sources/OpenClaw/OnboardingWizard.swift
++++ b/apps/macos/Sources/OpenClaw/OnboardingWizard.swift
+@@ -186,6 +186,9 @@ final class OnboardingWizardModel {
+     }
+ 
+     private func shouldSkipWizard() -> Bool {
++        if StarlabAgentClient.shared.isActivated {
++            return true
++        }
+         let root = OpenClawConfigFile.loadDict()
+         if let wizard = root["wizard"] as? [String: Any], !wizard.isEmpty {
+             return true
+diff --git a/apps/macos/Sources/OpenClaw/SessionMenuLabelView.swift b/apps/macos/Sources/OpenClaw/SessionMenuLabelView.swift
+index a1a14dcce6..7dbce49c8b 100644
+--- a/apps/macos/Sources/OpenClaw/SessionMenuLabelView.swift
++++ b/apps/macos/Sources/OpenClaw/SessionMenuLabelView.swift
+@@ -1,7 +1,14 @@
+ import SwiftUI
+ 
++private struct MenuItemHighlightedKey: EnvironmentKey {
++    static let defaultValue = false
++}
++
+ extension EnvironmentValues {
+-    @Entry var menuItemHighlighted: Bool = false
++    var menuItemHighlighted: Bool {
++        get { self[MenuItemHighlightedKey.self] }
++        set { self[MenuItemHighlightedKey.self] = newValue }
++    }
+ }
+ 
+ struct SessionMenuLabelView: View {
+diff --git a/apps/macos/Sources/OpenClaw/StarlabAgentClient.swift b/apps/macos/Sources/OpenClaw/StarlabAgentClient.swift
+new file mode 100644
+index 0000000000..1fa7d6e3cd
+--- /dev/null
++++ b/apps/macos/Sources/OpenClaw/StarlabAgentClient.swift
+@@ -0,0 +1,474 @@
++import AppKit
++import Foundation
++import SwiftUI
++
++private let starlabDefaultBaseURL = "https://starlabagent.pp.ua"
++private let starlabConfigKey = "starlab.agent.config.v1"
++private let starlabCommandPollNanoseconds: UInt64 = 5_000_000_000
++private let starlabDeviceCapabilities = [
++    "heartbeat",
++    "openclaw-macos",
++    "chat",
++    "command-polling",
++    "open_app",
++    "close_app",
++    "open_url",
++    "open_file",
++    "list_running_apps",
++    "active_window",
++    "screenshot",
++    "clipboard_get",
++    "clipboard_set",
++    "keyboard_type",
++    "hotkey",
++    "mouse_click",
++]
++
++struct StarlabAgentUser: Codable, Equatable {
++    var id: String
++    var displayName: String
++    var role: String
++    var employeeId: String?
++}
++
++struct StarlabAgentDevice: Codable, Equatable {
++    var deviceId: String
++    var displayName: String?
++    var status: String?
++    var lastSeenAt: String?
++    var heartbeatCount: Int?
++}
++
++struct StarlabAgentConfig: Codable, Equatable {
++    var activated: Bool
++    var controlPlaneURL: String
++    var user: StarlabAgentUser?
++    var agent: StarlabAgentDevice?
++    var deviceToken: String?
++    var activatedAt: String?
++    var lastHeartbeatAt: String?
++    var lastHeartbeatError: String?
++    var lastCommandAt: String?
++    var lastCommandError: String?
++}
++
++struct StarlabEnvelope<T: Codable>: Codable {
++    var ok: Bool
++    var data: T?
++    var error: StarlabAPIError?
++}
++
++struct StarlabAPIError: Codable {
++    var message: String
++}
++
++struct StarlabActivationData: Codable {
++    var user: StarlabAgentUser
++    var agent: StarlabAgentDevice
++    var deviceToken: String
++}
++
++struct StarlabChatData: Codable {
++    var answer: String
++}
++
++struct StarlabHeartbeatData: Codable {
++    var agent: StarlabAgentDevice
++    var created: Bool?
++}
++
++enum StarlabJSONValue: Codable, Equatable {
++    case string(String)
++    case number(Double)
++    case bool(Bool)
++    case object([String: StarlabJSONValue])
++    case array([StarlabJSONValue])
++    case null
++
++    init(from decoder: Decoder) throws {
++        let container = try decoder.singleValueContainer()
++        if container.decodeNil() {
++            self = .null
++        } else if let value = try? container.decode(Bool.self) {
++            self = .bool(value)
++        } else if let value = try? container.decode(Double.self) {
++            self = .number(value)
++        } else if let value = try? container.decode(String.self) {
++            self = .string(value)
++        } else if let value = try? container.decode([StarlabJSONValue].self) {
++            self = .array(value)
++        } else {
++            self = .object(try container.decode([String: StarlabJSONValue].self))
++        }
++    }
++
++    func encode(to encoder: Encoder) throws {
++        var container = encoder.singleValueContainer()
++        switch self {
++        case .string(let value):
++            try container.encode(value)
++        case .number(let value):
++            try container.encode(value)
++        case .bool(let value):
++            try container.encode(value)
++        case .object(let value):
++            try container.encode(value)
++        case .array(let value):
++            try container.encode(value)
++        case .null:
++            try container.encodeNil()
++        }
++    }
++
++    var stringValue: String? {
++        switch self {
++        case .string(let value):
++            return value
++        case .number(let value):
++            return String(value)
++        case .bool(let value):
++            return value ? "true" : "false"
++        default:
++            return nil
++        }
++    }
++
++    var doubleValue: Double? {
++        switch self {
++        case .number(let value):
++            return value
++        case .string(let value):
++            return Double(value)
++        default:
++            return nil
++        }
++    }
++
++    var boolValue: Bool? {
++        switch self {
++        case .bool(let value):
++            return value
++        case .string(let value):
++            return ["1", "true", "yes"].contains(value.lowercased())
++        default:
++            return nil
++        }
++    }
++}
++
++struct StarlabDeviceCommand: Codable, Equatable, Identifiable {
++    var id: String
++    var deviceId: String
++    var userId: String
++    var type: String
++    var args: [String: StarlabJSONValue]?
++}
++
++struct StarlabDeviceCommandsData: Codable {
++    var commands: [StarlabDeviceCommand]
++}
++
++struct StarlabDeviceCommandResultData: Codable {
++    var command: StarlabDeviceCommand?
++}
++
++@MainActor
++final class StarlabAgentClient: ObservableObject {
++    static let shared = StarlabAgentClient()
++    static let defaultControlPlaneURL = starlabDefaultBaseURL
++
++    @Published private(set) var config: StarlabAgentConfig
++
++    private var heartbeatTask: Task<Void, Never>?
++    private var commandTask: Task<Void, Never>?
++
++    private init() {
++        self.config = Self.loadConfig()
++    }
++
++    var isActivated: Bool {
++        self.config.activated && self.config.user != nil && self.config.agent != nil && self.config.deviceToken != nil
++    }
++
++    func activate(registrationCode: String, controlPlaneURL: String = starlabDefaultBaseURL) async throws {
++        let baseURL = Self.normalizedBaseURL(controlPlaneURL)
++        let body: [String: Any] = [
++            "registrationCode": registrationCode.trimmingCharacters(in: .whitespacesAndNewlines),
++            "deviceId": Self.defaultDeviceID(),
++            "displayName": Self.defaultDisplayName(),
++            "hostname": Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
++            "platform": "darwin",
++            "arch": Self.architectureName(),
++            "osRelease": ProcessInfo.processInfo.operatingSystemVersionString,
++            "agentVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0",
++            "capabilities": starlabDeviceCapabilities,
++        ]
++        let response: StarlabEnvelope<StarlabActivationData> = try await Self.postJSON(
++            url: "\(baseURL)/api/v1/device-agents/activate",
++            body: body,
++            headers: [:])
++        guard response.ok, let data = response.data else {
++            throw NSError(
++                domain: "StarlabAgent",
++                code: 1,
++                userInfo: [NSLocalizedDescriptionKey: response.error?.message ?? "Activation failed"])
++        }
++        let next = StarlabAgentConfig(
++            activated: true,
++            controlPlaneURL: baseURL,
++            user: data.user,
++            agent: data.agent,
++            deviceToken: data.deviceToken,
++            activatedAt: ISO8601DateFormatter().string(from: Date()),
++            lastHeartbeatAt: nil,
++            lastHeartbeatError: nil,
++            lastCommandAt: nil,
++            lastCommandError: nil)
++        self.config = next
++        Self.saveConfig(next)
++        self.startHeartbeat()
++        self.startCommandPolling()
++    }
++
++    func reset() {
++        UserDefaults.standard.removeObject(forKey: starlabConfigKey)
++        self.config = Self.loadConfig()
++        self.heartbeatTask?.cancel()
++        self.heartbeatTask = nil
++        self.commandTask?.cancel()
++        self.commandTask = nil
++    }
++
++    func startHeartbeat() {
++        self.heartbeatTask?.cancel()
++        guard self.isActivated else { return }
++        self.heartbeatTask = Task { [weak self] in
++            while !Task.isCancelled {
++                await self?.sendHeartbeatAndStore()
++                try? await Task.sleep(nanoseconds: 60_000_000_000)
++            }
++        }
++    }
++
++    func startCommandPolling() {
++        self.commandTask?.cancel()
++        guard self.isActivated else { return }
++        self.commandTask = Task { [weak self] in
++            while !Task.isCancelled {
++                await self?.pollDeviceCommandsAndStore()
++                try? await Task.sleep(nanoseconds: starlabCommandPollNanoseconds)
++            }
++        }
++    }
++
++    func ask(_ text: String) async throws -> String {
++        guard let agent = self.config.agent, let token = self.config.deviceToken else {
++            throw NSError(domain: "StarlabAgent", code: 2, userInfo: [NSLocalizedDescriptionKey: "Agent is not activated"])
++        }
++        let response: StarlabEnvelope<StarlabChatData> = try await Self.postJSON(
++            url: "\(self.config.controlPlaneURL)/api/v1/local-agent/chat",
++            body: [
++                "deviceId": agent.deviceId,
++                "text": text,
++            ],
++            headers: ["X-Device-Agent-Token": token])
++        guard response.ok, let data = response.data else {
++            throw NSError(
++                domain: "StarlabAgent",
++                code: 3,
++                userInfo: [NSLocalizedDescriptionKey: response.error?.message ?? "Assistant request failed"])
++        }
++        return data.answer
++    }
++
++    private func sendHeartbeatAndStore() async {
++        do {
++            let updated = try await self.sendHeartbeat()
++            var next = self.config
++            next.agent = updated.agent
++            next.lastHeartbeatAt = ISO8601DateFormatter().string(from: Date())
++            next.lastHeartbeatError = nil
++            self.config = next
++            Self.saveConfig(next)
++        } catch {
++            var next = self.config
++            next.lastHeartbeatError = error.localizedDescription
++            self.config = next
++            Self.saveConfig(next)
++        }
++    }
++
++    private func sendHeartbeat() async throws -> StarlabHeartbeatData {
++        guard let user = self.config.user, let agent = self.config.agent, let token = self.config.deviceToken else {
++            throw NSError(domain: "StarlabAgent", code: 4, userInfo: [NSLocalizedDescriptionKey: "Agent is not activated"])
++        }
++        let response: StarlabEnvelope<StarlabHeartbeatData> = try await Self.postJSON(
++            url: "\(self.config.controlPlaneURL)/api/v1/device-agents/heartbeat",
++            body: [
++                "userId": user.id,
++                "deviceId": agent.deviceId,
++                "displayName": agent.displayName ?? Self.defaultDisplayName(),
++                "hostname": Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
++                "platform": "darwin",
++                "arch": Self.architectureName(),
++                "osRelease": ProcessInfo.processInfo.operatingSystemVersionString,
++                "agentVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1.0",
++                "capabilities": starlabDeviceCapabilities,
++            ],
++            headers: ["X-Device-Agent-Token": token])
++        guard response.ok, let data = response.data else {
++            throw NSError(
++                domain: "StarlabAgent",
++                code: 5,
++                userInfo: [NSLocalizedDescriptionKey: response.error?.message ?? "Heartbeat failed"])
++        }
++        return data
++    }
++
++    private func pollDeviceCommandsAndStore() async {
++        do {
++            let executed = try await self.pollDeviceCommands()
++            var next = self.config
++            if executed > 0 {
++                next.lastCommandAt = ISO8601DateFormatter().string(from: Date())
++            }
++            next.lastCommandError = nil
++            self.config = next
++            Self.saveConfig(next)
++        } catch {
++            var next = self.config
++            next.lastCommandError = error.localizedDescription
++            self.config = next
++            Self.saveConfig(next)
++        }
++    }
++
++    private func pollDeviceCommands() async throws -> Int {
++        guard let agent = self.config.agent, let token = self.config.deviceToken else {
++            return 0
++        }
++        let response: StarlabEnvelope<StarlabDeviceCommandsData> = try await Self.getJSON(
++            url: "\(self.config.controlPlaneURL)/api/v1/device-agents/commands?deviceId=\(Self.urlQuery(agent.deviceId))&limit=5",
++            headers: ["X-Device-Agent-Token": token])
++        guard response.ok, let data = response.data else {
++            throw NSError(
++                domain: "StarlabAgent",
++                code: 20,
++                userInfo: [NSLocalizedDescriptionKey: response.error?.message ?? "Command polling failed"])
++        }
++
++        for command in data.commands {
++            let execution = await StarlabDeviceCommandExecutor.execute(command)
++            let errorValue: Any = execution.error ?? NSNull()
++            let _: StarlabEnvelope<StarlabDeviceCommandResultData> = try await Self.postJSON(
++                url: "\(self.config.controlPlaneURL)/api/v1/device-agents/commands/\(Self.urlPath(command.id))/result",
++                body: [
++                    "deviceId": agent.deviceId,
++                    "status": execution.status,
++                    "result": execution.result,
++                    "error": errorValue,
++                ],
++                headers: ["X-Device-Agent-Token": token])
++        }
++        return data.commands.count
++    }
++
++    private static func loadConfig() -> StarlabAgentConfig {
++        guard let data = UserDefaults.standard.data(forKey: starlabConfigKey),
++              let decoded = try? JSONDecoder().decode(StarlabAgentConfig.self, from: data)
++        else {
++            return StarlabAgentConfig(
++                activated: false,
++                controlPlaneURL: starlabDefaultBaseURL,
++                user: nil,
++                agent: nil,
++                deviceToken: nil,
++                activatedAt: nil,
++                lastHeartbeatAt: nil,
++                lastHeartbeatError: nil,
++                lastCommandAt: nil,
++                lastCommandError: nil)
++        }
++        return decoded
++    }
++
++    private static func saveConfig(_ config: StarlabAgentConfig) {
++        if let data = try? JSONEncoder().encode(config) {
++            UserDefaults.standard.set(data, forKey: starlabConfigKey)
++        }
++    }
++
++    private static func postJSON<T: Codable>(url: String, body: [String: Any], headers: [String: String]) async throws -> T {
++        guard let endpoint = URL(string: url) else {
++            throw NSError(domain: "StarlabAgent", code: 10, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(url)"])
++        }
++        var request = URLRequest(url: endpoint)
++        request.httpMethod = "POST"
++        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
++        request.setValue("application/json", forHTTPHeaderField: "Accept")
++        for (key, value) in headers {
++            request.setValue(value, forHTTPHeaderField: key)
++        }
++        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
++        let (data, response) = try await URLSession.shared.data(for: request)
++        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
++            if let decoded = try? JSONDecoder().decode(T.self, from: data) {
++                return decoded
++            }
++            throw NSError(domain: "StarlabAgent", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
++        }
++        return try JSONDecoder().decode(T.self, from: data)
++    }
++
++    private static func getJSON<T: Codable>(url: String, headers: [String: String]) async throws -> T {
++        guard let endpoint = URL(string: url) else {
++            throw NSError(domain: "StarlabAgent", code: 11, userInfo: [NSLocalizedDescriptionKey: "Invalid URL: \(url)"])
++        }
++        var request = URLRequest(url: endpoint)
++        request.httpMethod = "GET"
++        request.setValue("application/json", forHTTPHeaderField: "Accept")
++        for (key, value) in headers {
++            request.setValue(value, forHTTPHeaderField: key)
++        }
++        let (data, response) = try await URLSession.shared.data(for: request)
++        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
++            if let decoded = try? JSONDecoder().decode(T.self, from: data) {
++                return decoded
++            }
++            throw NSError(domain: "StarlabAgent", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
++        }
++        return try JSONDecoder().decode(T.self, from: data)
++    }
++
++    private static func normalizedBaseURL(_ value: String) -> String {
++        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
++        return (trimmed.isEmpty ? starlabDefaultBaseURL : trimmed).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
++    }
++
++    private static func defaultDeviceID() -> String {
++        let raw = "\(NSUserName())-\(ProcessInfo.processInfo.hostName)"
++        return raw.lowercased().replacingOccurrences(of: #"[^a-z0-9._-]+"#, with: "-", options: .regularExpression)
++    }
++
++    private static func defaultDisplayName() -> String {
++        "\(NSUserName()) on \(Host.current().localizedName ?? ProcessInfo.processInfo.hostName)"
++    }
++
++    private static func urlQuery(_ value: String) -> String {
++        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
++    }
++
++    private static func urlPath(_ value: String) -> String {
++        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
++    }
++
++    private static func architectureName() -> String {
++        #if arch(arm64)
++        return "arm64"
++        #elseif arch(x86_64)
++        return "x64"
++        #else
++        return "unknown"
++        #endif
++    }
++}
+diff --git a/apps/macos/Sources/OpenClaw/StarlabAgentWindow.swift b/apps/macos/Sources/OpenClaw/StarlabAgentWindow.swift
+new file mode 100644
+index 0000000000..e85f36c97a
+--- /dev/null
++++ b/apps/macos/Sources/OpenClaw/StarlabAgentWindow.swift
+@@ -0,0 +1,330 @@
++import AppKit
++import SwiftUI
++
++@MainActor
++final class StarlabAgentWindowController {
++    static let shared = StarlabAgentWindowController()
++
++    private var window: NSWindow?
++
++    func show() {
++        if let window {
++            DockIconManager.shared.temporarilyShowDock()
++            window.makeKeyAndOrderFront(nil)
++            NSApp.activate(ignoringOtherApps: true)
++            return
++        }
++
++        let hosting = NSHostingController(rootView: StarlabAgentWindowView())
++        let window = NSWindow(contentViewController: hosting)
++        window.title = "Starlab OpenClaw Agent"
++        window.setContentSize(NSSize(width: 720, height: 680))
++        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
++        window.titlebarAppearsTransparent = true
++        window.titleVisibility = .hidden
++        window.isMovableByWindowBackground = true
++        window.isReleasedWhenClosed = false
++        window.center()
++        DockIconManager.shared.temporarilyShowDock()
++        window.makeKeyAndOrderFront(nil)
++        NSApp.activate(ignoringOtherApps: true)
++        self.window = window
++    }
++
++    func showIfNeeded() {
++        if !StarlabAgentClient.shared.isActivated {
++            self.show()
++        }
++    }
++}
++
++private struct StarlabChatMessage: Identifiable, Equatable {
++    enum Sender: Equatable {
++        case user
++        case assistant
++    }
++
++    let id = UUID()
++    let sender: Sender
++    let text: String
++}
++
++struct StarlabAgentWindowView: View {
++    @ObservedObject private var client = StarlabAgentClient.shared
++    @State private var controlPlaneURL = StarlabAgentClient.defaultControlPlaneURL
++    @State private var registrationCode = ""
++    @State private var isActivating = false
++    @State private var activationError: String?
++    @State private var draft = ""
++    @State private var isSending = false
++    @State private var chatError: String?
++    @State private var messages: [StarlabChatMessage] = [
++        StarlabChatMessage(
++            sender: .assistant,
++            text: "Я локальный OpenClaw-агент Starlab. После регистрации я работаю с тем же сервером и памятью, что Telegram-бот."),
++    ]
++
++    var body: some View {
++        VStack(spacing: 0) {
++            self.header
++            Divider()
++            if self.client.isActivated {
++                self.chatView
++            } else {
++                self.activationView
++            }
++        }
++        .frame(minWidth: 640, minHeight: 560)
++        .background(Color(nsColor: .windowBackgroundColor))
++        .onAppear {
++            self.controlPlaneURL = self.client.config.controlPlaneURL
++        }
++    }
++
++    private var header: some View {
++        HStack(alignment: .center, spacing: 14) {
++            ZStack {
++                RoundedRectangle(cornerRadius: 12)
++                    .fill(self.client.isActivated ? Color.green.opacity(0.14) : Color.blue.opacity(0.14))
++                Image(systemName: self.client.isActivated ? "checkmark.seal.fill" : "person.badge.key.fill")
++                    .font(.system(size: 24, weight: .semibold))
++                    .foregroundStyle(self.client.isActivated ? .green : .blue)
++            }
++            .frame(width: 48, height: 48)
++
++            VStack(alignment: .leading, spacing: 4) {
++                Text("Starlab OpenClaw Agent")
++                    .font(.title2.weight(.semibold))
++                Text(self.headerSubtitle)
++                    .font(.callout)
++                    .foregroundStyle(.secondary)
++                    .lineLimit(2)
++            }
++            Spacer(minLength: 12)
++            if self.client.isActivated {
++                self.connectionBadge
++            }
++        }
++        .padding(.horizontal, 26)
++        .padding(.top, 24)
++        .padding(.bottom, 18)
++    }
++
++    private var headerSubtitle: String {
++        guard self.client.isActivated, let user = self.client.config.user else {
++            return "Введите регистрационный код, который выдал Николай, чтобы привязать это устройство к сотруднику."
++        }
++        return "\(user.displayName) - \(user.role). Устройство подключено к \(self.client.config.controlPlaneURL)."
++    }
++
++    private var connectionBadge: some View {
++        VStack(alignment: .trailing, spacing: 4) {
++            Text("ONLINE")
++                .font(.caption.weight(.bold))
++                .foregroundStyle(.green)
++            if let heartbeatAt = self.client.config.lastHeartbeatAt {
++                Text("heartbeat: \(heartbeatAt)")
++                    .font(.caption2)
++                    .foregroundStyle(.secondary)
++            }
++        }
++    }
++
++    private var activationView: some View {
++        VStack(alignment: .leading, spacing: 20) {
++            VStack(alignment: .leading, spacing: 8) {
++                Text("Регистрация устройства")
++                    .font(.headline)
++                Text("Код создаётся Николаем в Telegram-боте. После успешной регистрации приложение сохранит device token и будет отправлять heartbeat на сервер.")
++                    .font(.callout)
++                    .foregroundStyle(.secondary)
++            }
++
++            VStack(alignment: .leading, spacing: 10) {
++                Text("Сервер")
++                    .font(.caption.weight(.semibold))
++                    .foregroundStyle(.secondary)
++                TextField("https://starlabagent.pp.ua", text: self.$controlPlaneURL)
++                    .textFieldStyle(.roundedBorder)
++                    .disabled(self.isActivating)
++            }
++
++            VStack(alignment: .leading, spacing: 10) {
++                Text("Registration code")
++                    .font(.caption.weight(.semibold))
++                    .foregroundStyle(.secondary)
++                SecureField("Код от Николая", text: self.$registrationCode)
++                    .textFieldStyle(.roundedBorder)
++                    .disabled(self.isActivating)
++                    .onSubmit { Task { await self.activate() } }
++            }
++
++            if let activationError {
++                Text(activationError)
++                    .font(.callout)
++                    .foregroundStyle(.red)
++                    .padding(.vertical, 2)
++            }
++
++            HStack(spacing: 12) {
++                Button {
++                    Task { await self.activate() }
++                } label: {
++                    if self.isActivating {
++                        ProgressView()
++                            .controlSize(.small)
++                    } else {
++                        Text("Подключить устройство")
++                    }
++                }
++                .buttonStyle(.borderedProminent)
++                .disabled(self.isActivating || self.registrationCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
++
++                Button("Сбросить") {
++                    self.registrationCode = ""
++                    self.activationError = nil
++                }
++                .disabled(self.isActivating)
++            }
++
++            Spacer(minLength: 0)
++        }
++        .padding(26)
++    }
++
++    private var chatView: some View {
++        VStack(spacing: 0) {
++            ScrollViewReader { proxy in
++                ScrollView {
++                    LazyVStack(alignment: .leading, spacing: 12) {
++                        self.deviceSummary
++                        ForEach(self.messages) { message in
++                            self.messageBubble(message)
++                                .id(message.id)
++                        }
++                    }
++                    .padding(24)
++                }
++                .onChange(of: self.messages) { _, messages in
++                    if let last = messages.last {
++                        withAnimation(.easeOut(duration: 0.2)) {
++                            proxy.scrollTo(last.id, anchor: .bottom)
++                        }
++                    }
++                }
++            }
++
++            Divider()
++            VStack(alignment: .leading, spacing: 10) {
++                if let chatError {
++                    Text(chatError)
++                        .font(.callout)
++                        .foregroundStyle(.red)
++                }
++                HStack(alignment: .bottom, spacing: 10) {
++                    TextField("Напишите вопрос агенту", text: self.$draft, axis: .vertical)
++                        .textFieldStyle(.roundedBorder)
++                        .lineLimit(1...4)
++                        .disabled(self.isSending)
++                        .onSubmit { Task { await self.send() } }
++                    Button {
++                        Task { await self.send() }
++                    } label: {
++                        if self.isSending {
++                            ProgressView()
++                                .controlSize(.small)
++                        } else {
++                            Image(systemName: "paperplane.fill")
++                        }
++                    }
++                    .buttonStyle(.borderedProminent)
++                    .disabled(self.isSending || self.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
++                }
++                HStack {
++                    Button("Сбросить регистрацию") {
++                        self.client.reset()
++                        self.chatError = nil
++                        self.activationError = nil
++                        self.messages = []
++                    }
++                    .buttonStyle(.bordered)
++                    .controlSize(.small)
++                    Spacer()
++                }
++            }
++            .padding(18)
++        }
++    }
++
++    private var deviceSummary: some View {
++        VStack(alignment: .leading, spacing: 8) {
++            Text("Привязка")
++                .font(.headline)
++            if let user = self.client.config.user {
++                Text("Пользователь: \(user.displayName) (\(user.role))")
++            }
++            if let agent = self.client.config.agent {
++                Text("Устройство: \(agent.displayName ?? agent.deviceId)")
++                Text("Device ID: \(agent.deviceId)")
++            }
++            if let error = self.client.config.lastHeartbeatError {
++                Text("Последняя ошибка heartbeat: \(error)")
++                    .foregroundStyle(.orange)
++            }
++        }
++        .font(.callout)
++        .padding(14)
++        .frame(maxWidth: .infinity, alignment: .leading)
++        .background(Color(nsColor: .controlBackgroundColor))
++        .clipShape(RoundedRectangle(cornerRadius: 10))
++    }
++
++    private func messageBubble(_ message: StarlabChatMessage) -> some View {
++        HStack {
++            if message.sender == .user {
++                Spacer(minLength: 48)
++            }
++            Text(message.text)
++                .font(.callout)
++                .textSelection(.enabled)
++                .padding(.vertical, 10)
++                .padding(.horizontal, 12)
++                .background(message.sender == .user ? Color.accentColor.opacity(0.18) : Color(nsColor: .controlBackgroundColor))
++                .clipShape(RoundedRectangle(cornerRadius: 10))
++                .frame(maxWidth: 520, alignment: message.sender == .user ? .trailing : .leading)
++            if message.sender == .assistant {
++                Spacer(minLength: 48)
++            }
++        }
++    }
++
++    private func activate() async {
++        let code = self.registrationCode.trimmingCharacters(in: .whitespacesAndNewlines)
++        guard !code.isEmpty else { return }
++        self.isActivating = true
++        self.activationError = nil
++        do {
++            try await self.client.activate(registrationCode: code, controlPlaneURL: self.controlPlaneURL)
++            self.messages.append(StarlabChatMessage(sender: .assistant, text: "Готово. Устройство привязано, heartbeat запущен, можно общаться с ассистентом."))
++        } catch {
++            self.activationError = error.localizedDescription
++        }
++        self.isActivating = false
++    }
++
++    private func send() async {
++        let text = self.draft.trimmingCharacters(in: .whitespacesAndNewlines)
++        guard !text.isEmpty else { return }
++        self.draft = ""
++        self.chatError = nil
++        self.isSending = true
++        self.messages.append(StarlabChatMessage(sender: .user, text: text))
++        do {
++            let answer = try await self.client.ask(text)
++            self.messages.append(StarlabChatMessage(sender: .assistant, text: answer))
++        } catch {
++            self.chatError = error.localizedDescription
++        }
++        self.isSending = false
++    }
++}
+diff --git a/apps/macos/Sources/OpenClaw/StarlabDeviceCommandExecutor.swift b/apps/macos/Sources/OpenClaw/StarlabDeviceCommandExecutor.swift
+new file mode 100644
+index 0000000000..19bea21af5
+--- /dev/null
++++ b/apps/macos/Sources/OpenClaw/StarlabDeviceCommandExecutor.swift
+@@ -0,0 +1,279 @@
++import AppKit
++import Foundation
++
++struct StarlabDeviceCommandExecution {
++    var status: String
++    var result: [String: Any]
++    var error: String?
++}
++
++@MainActor
++enum StarlabDeviceCommandExecutor {
++    static func execute(_ command: StarlabDeviceCommand) async -> StarlabDeviceCommandExecution {
++        do {
++            switch command.type {
++            case "open_app":
++                return .success(try openApp(command.argsDictionary))
++            case "close_app":
++                return .success(try closeApp(command.argsDictionary))
++            case "open_url":
++                return .success(try openURL(command.argsDictionary))
++            case "open_file":
++                return .success(try openFile(command.argsDictionary))
++            case "list_running_apps":
++                return .success(listRunningApps())
++            case "active_window":
++                return .success(activeWindow())
++            case "screenshot":
++                return .success(try screenshot())
++            case "clipboard_get":
++                return .success(clipboardText())
++            case "clipboard_set":
++                return .success(try setClipboard(command.argsDictionary))
++            case "keyboard_type":
++                return .success(try typeText(command.argsDictionary))
++            case "hotkey":
++                return .success(try pressHotkey(command.argsDictionary))
++            case "mouse_click":
++                return .success(try clickMouse(command.argsDictionary))
++            case "ocr_screen", "openclaw_prompt":
++                return .unsupported("\(command.type) is not supported in this local build yet")
++            default:
++                return .unsupported("Unknown command type: \(command.type)")
++            }
++        } catch {
++            return .failure(error.localizedDescription)
++        }
++    }
++
++    private static func openApp(_ args: [String: StarlabJSONValue]) throws -> [String: Any] {
++        let appName = try requiredString(args, names: ["app", "name", "path", "target"], message: "open_app requires args.app")
++        try runProcess("/usr/bin/open", ["-a", appName])
++        return ["opened": appName]
++    }
++
++    private static func closeApp(_ args: [String: StarlabJSONValue]) throws -> [String: Any] {
++        let appName = try requiredString(args, names: ["app", "name", "process", "processName"], message: "close_app requires args.app")
++        let script = "tell application \"\(escapeAppleScript(appName))\" to quit"
++        try runProcess("/usr/bin/osascript", ["-e", script])
++        return ["closed": appName]
++    }
++
++    private static func openURL(_ args: [String: StarlabJSONValue]) throws -> [String: Any] {
++        let rawURL = try requiredString(args, names: ["url", "target"], message: "open_url requires args.url")
++        guard let url = URL(string: rawURL), NSWorkspace.shared.open(url) else {
++            throw commandError("Unable to open URL: \(rawURL)")
++        }
++        return ["opened": rawURL]
++    }
++
++    private static func openFile(_ args: [String: StarlabJSONValue]) throws -> [String: Any] {
++        let path = try requiredString(args, names: ["path", "file", "target"], message: "open_file requires args.path")
++        let url = URL(fileURLWithPath: path)
++        guard NSWorkspace.shared.open(url) else {
++            throw commandError("Unable to open file: \(path)")
++        }
++        return ["opened": path]
++    }
++
++    private static func listRunningApps() -> [String: Any] {
++        let apps = NSWorkspace.shared.runningApplications
++            .filter { $0.activationPolicy == .regular || $0.localizedName != nil }
++            .prefix(120)
++            .map { app in
++                [
++                    "name": app.localizedName ?? "",
++                    "processId": Int(app.processIdentifier),
++                    "bundleIdentifier": app.bundleIdentifier ?? "",
++                    "isActive": app.isActive,
++                ] as [String: Any]
++            }
++        return ["apps": Array(apps)]
++    }
++
++    private static func activeWindow() -> [String: Any] {
++        guard let app = NSWorkspace.shared.frontmostApplication else {
++            return ["app": NSNull()]
++        }
++        return [
++            "app": [
++                "name": app.localizedName ?? "",
++                "processId": Int(app.processIdentifier),
++                "bundleIdentifier": app.bundleIdentifier ?? "",
++            ],
++        ]
++    }
++
++    private static func screenshot() throws -> [String: Any] {
++        let outputURL = FileManager.default.temporaryDirectory
++            .appendingPathComponent("starlab-openclaw-shot-\(UUID().uuidString).png")
++        try runProcess("/usr/sbin/screencapture", ["-x", "-t", "png", outputURL.path])
++        let data = try Data(contentsOf: outputURL)
++        try? FileManager.default.removeItem(at: outputURL)
++        return [
++            "mimeType": "image/png",
++            "filename": outputURL.lastPathComponent,
++            "base64": data.base64EncodedString(),
++        ]
++    }
++
++    private static func clipboardText() -> [String: Any] {
++        let text = NSPasteboard.general.string(forType: .string) ?? ""
++        return ["text": text]
++    }
++
++    private static func setClipboard(_ args: [String: StarlabJSONValue]) throws -> [String: Any] {
++        let text = stringArg(args, names: ["text", "value", "content"]) ?? ""
++        NSPasteboard.general.clearContents()
++        NSPasteboard.general.setString(text, forType: .string)
++        return ["ok": true]
++    }
++
++    private static func typeText(_ args: [String: StarlabJSONValue]) throws -> [String: Any] {
++        let text = try requiredString(args, names: ["text", "value"], message: "keyboard_type requires args.text")
++        _ = try setClipboard(["text": .string(text)])
++        try sendHotkey(["cmd", "v"])
++        return ["typed": text.count, "method": "clipboard-paste"]
++    }
++
++    private static func pressHotkey(_ args: [String: StarlabJSONValue]) throws -> [String: Any] {
++        let keys = normalizedKeys(args["keys"] ?? args["hotkey"] ?? args["combo"])
++        guard !keys.isEmpty else {
++            throw commandError("hotkey requires args.keys")
++        }
++        try sendHotkey(keys)
++        return ["keys": keys]
++    }
++
++    private static func clickMouse(_ args: [String: StarlabJSONValue]) throws -> [String: Any] {
++        guard let x = args["x"]?.doubleValue, let y = args["y"]?.doubleValue else {
++            throw commandError("mouse_click requires numeric args.x and args.y")
++        }
++        let buttonName = args["button"]?.stringValue?.lowercased() ?? "left"
++        let button: CGMouseButton = buttonName == "right" ? .right : .left
++        let down: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
++        let up: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
++        let point = CGPoint(x: x, y: y)
++        CGEvent(mouseEventSource: nil, mouseType: down, mouseCursorPosition: point, mouseButton: button)?.post(tap: .cghidEventTap)
++        CGEvent(mouseEventSource: nil, mouseType: up, mouseCursorPosition: point, mouseButton: button)?.post(tap: .cghidEventTap)
++        return ["x": x, "y": y, "button": buttonName]
++    }
++
++    private static func sendHotkey(_ keys: [String]) throws {
++        var flags: CGEventFlags = []
++        var keyName: String?
++        for key in keys.map({ $0.lowercased() }) {
++            switch key {
++            case "cmd", "command", "meta":
++                flags.insert(.maskCommand)
++            case "ctrl", "control":
++                flags.insert(.maskControl)
++            case "alt", "option":
++                flags.insert(.maskAlternate)
++            case "shift":
++                flags.insert(.maskShift)
++            default:
++                keyName = key
++            }
++        }
++        guard let finalKey = keyName, let keyCode = keyCodeMap[finalKey] else {
++            throw commandError("Unsupported hotkey key: \(keyName ?? "none")")
++        }
++        postKey(keyCode, flags: flags, keyDown: true)
++        postKey(keyCode, flags: flags, keyDown: false)
++    }
++
++    private static func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags, keyDown: Bool) {
++        let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: keyDown)
++        event?.flags = flags
++        event?.post(tap: .cghidEventTap)
++    }
++
++    private static func runProcess(_ executable: String, _ arguments: [String]) throws {
++        let process = Process()
++        process.executableURL = URL(fileURLWithPath: executable)
++        process.arguments = arguments
++        let errorPipe = Pipe()
++        process.standardError = errorPipe
++        try process.run()
++        process.waitUntilExit()
++        if process.terminationStatus != 0 {
++            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
++            let stderr = String(data: data, encoding: .utf8) ?? ""
++            throw commandError(stderr.isEmpty ? "\(executable) exited with \(process.terminationStatus)" : stderr)
++        }
++    }
++
++    private static func requiredString(
++        _ args: [String: StarlabJSONValue],
++        names: [String],
++        message: String
++    ) throws -> String {
++        guard let value = stringArg(args, names: names), !value.isEmpty else {
++            throw commandError(message)
++        }
++        return value
++    }
++
++    private static func stringArg(_ args: [String: StarlabJSONValue], names: [String]) -> String? {
++        for name in names {
++            if let value = args[name]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {
++                return value
++            }
++        }
++        return nil
++    }
++
++    private static func normalizedKeys(_ value: StarlabJSONValue?) -> [String] {
++        switch value {
++        case .array(let values)?:
++            return values.compactMap(\.stringValue).map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty }
++        case .string(let value)?:
++            return value
++                .split { $0 == "+" || $0 == "," || $0 == " " }
++                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
++                .filter { !$0.isEmpty }
++        default:
++            return []
++        }
++    }
++
++    private static func escapeAppleScript(_ value: String) -> String {
++        value.replacingOccurrences(of: "\\", with: "\\\\")
++            .replacingOccurrences(of: "\"", with: "\\\"")
++    }
++
++    private static func commandError(_ message: String) -> NSError {
++        NSError(domain: "StarlabDeviceCommand", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
++    }
++
++    private static let keyCodeMap: [String: CGKeyCode] = [
++        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
++        "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "1": 18, "2": 19,
++        "3": 20, "4": 21, "6": 22, "5": 23, "=": 24, "9": 25, "7": 26, "-": 27, "8": 28,
++        "0": 29, "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35, "enter": 36,
++        "return": 36, "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42, ",": 43,
++        "/": 44, "n": 45, "m": 46, ".": 47, "tab": 48, "space": 49, "`": 50, "delete": 51,
++        "esc": 53, "escape": 53, "left": 123, "right": 124, "down": 125, "up": 126,
++    ]
++}
++
++private extension StarlabDeviceCommand {
++    var argsDictionary: [String: StarlabJSONValue] {
++        self.args ?? [:]
++    }
++}
++
++private extension StarlabDeviceCommandExecution {
++    static func success(_ result: [String: Any]) -> StarlabDeviceCommandExecution {
++        StarlabDeviceCommandExecution(status: "succeeded", result: result, error: nil)
++    }
++
++    static func failure(_ error: String) -> StarlabDeviceCommandExecution {
++        StarlabDeviceCommandExecution(status: "failed", result: [:], error: error)
++    }
++
++    static func unsupported(_ error: String) -> StarlabDeviceCommandExecution {
++        StarlabDeviceCommandExecution(status: "unsupported", result: [:], error: error)
++    }
++}
+diff --git a/apps/windows/README.md b/apps/windows/README.md
+new file mode 100644
+index 0000000000..4ce11db6ee
+--- /dev/null
++++ b/apps/windows/README.md
+@@ -0,0 +1,27 @@
++# Starlab OpenClaw Agent for Windows
++
++This is the Windows desktop target for the Starlab fork of OpenClaw.
++
++It is intentionally placed under `openclaw/apps/windows` so the employee desktop app is built from the OpenClaw source tree, while the central control-plane stays on `https://starlabagent.pp.ua`.
++
++## Flow
++
++1. Николай creates an invite/registration code in the Telegram bot.
++2. The employee launches the Windows app and enters the code.
++3. The app calls `POST /api/v1/device-agents/activate`.
++4. The server returns user, role, device, and device token.
++5. The token is stored through Electron `safeStorage` when available.
++6. The app sends heartbeat every 60 seconds and sends chat messages to `POST /api/v1/local-agent/chat`.
++
++## Build
++
++```powershell
++npm install
++npm run build:win
++```
++
++The artifact is:
++
++```text
++dist/starlab-openclaw-agent-windows.exe
++```
+diff --git a/apps/windows/package.json b/apps/windows/package.json
+new file mode 100644
+index 0000000000..6717f77cbd
+--- /dev/null
++++ b/apps/windows/package.json
+@@ -0,0 +1,58 @@
++{
++  "name": "@openclaw/starlab-windows-agent",
++  "version": "0.1.0",
++  "private": true,
++  "description": "Windows desktop app target for the Starlab OpenClaw employee agent.",
++  "main": "src/main.cjs",
++  "scripts": {
++    "start": "electron .",
++    "build:win": "electron-builder --win nsis --x64",
++    "build:linux": "electron-builder --linux deb --x64"
++  },
++  "build": {
++    "appId": "com.starlab.openclaw.agent",
++    "productName": "Starlab OpenClaw Agent",
++    "copyright": "Copyright (c) 2026 Starlab",
++    "asar": true,
++    "directories": {
++      "output": "dist"
++    },
++    "files": [
++      "src/**/*",
++      "package.json"
++    ],
++    "win": {
++      "signAndEditExecutable": false,
++      "forceCodeSigning": false,
++      "requestedExecutionLevel": "requireAdministrator",
++      "target": [
++        "nsis"
++      ]
++    },
++    "nsis": {
++      "artifactName": "starlab-openclaw-agent-windows.exe",
++      "oneClick": false,
++      "perMachine": true,
++      "allowElevation": true,
++      "allowToChangeInstallationDirectory": true,
++      "createDesktopShortcut": true,
++      "createStartMenuShortcut": true,
++      "shortcutName": "Starlab OpenClaw Agent"
++    },
++    "deb": {
++      "artifactName": "starlab-openclaw-agent-linux-amd64.deb",
++      "category": "Office"
++    },
++    "linux": {
++      "target": [
++        "deb"
++      ],
++      "maintainer": "Starlab",
++      "category": "Office"
++    }
++  },
++  "devDependencies": {
++    "electron": "^33.4.11",
++    "electron-builder": "^25.1.8"
++  }
++}
+diff --git a/apps/windows/src/main.cjs b/apps/windows/src/main.cjs
+new file mode 100644
+index 0000000000..a823d327c7
+--- /dev/null
++++ b/apps/windows/src/main.cjs
+@@ -0,0 +1,689 @@
++const fs = require("node:fs");
++const os = require("node:os");
++const path = require("node:path");
++const { execFile } = require("node:child_process");
++const { app, BrowserWindow, ipcMain, safeStorage, shell } = require("electron");
++
++const APP_VERSION = "0.1.0";
++const DEFAULT_CONTROL_PLANE_URL = "https://starlabagent.pp.ua";
++const HEARTBEAT_INTERVAL_MS = 60_000;
++const COMMAND_POLL_INTERVAL_MS = 5_000;
++
++let mainWindow = null;
++let heartbeatTimer = null;
++let commandTimer = null;
++
++const DEVICE_CAPABILITIES = [
++  "heartbeat",
++  "openclaw-windows",
++  "chat",
++  "command-polling",
++  "open_app",
++  "close_app",
++  "open_url",
++  "open_file",
++  "list_running_apps",
++  "active_window",
++  "screenshot",
++  "clipboard_get",
++  "clipboard_set",
++  "keyboard_type",
++  "hotkey",
++  "mouse_click",
++];
++
++function configPath() {
++  return path.join(app.getPath("userData"), "agent-config.json");
++}
++
++function readConfig() {
++  try {
++    const parsed = JSON.parse(fs.readFileSync(configPath(), "utf8"));
++    return {
++      controlPlaneUrl: DEFAULT_CONTROL_PLANE_URL,
++      activated: false,
++      ...parsed,
++    };
++  } catch {
++    return {
++      controlPlaneUrl: DEFAULT_CONTROL_PLANE_URL,
++      activated: false,
++    };
++  }
++}
++
++function writeConfig(config) {
++  fs.mkdirSync(path.dirname(configPath()), { recursive: true });
++  fs.writeFileSync(configPath(), JSON.stringify(config, null, 2), { encoding: "utf8", mode: 0o600 });
++}
++
++function normalizeBaseUrl(value) {
++  return String(value || DEFAULT_CONTROL_PLANE_URL).trim().replace(/\/+$/u, "");
++}
++
++function defaultDeviceId() {
++  return `${os.userInfo().username}-${os.hostname()}`
++    .toLowerCase()
++    .replace(/[^a-z0-9._-]+/giu, "-");
++}
++
++function defaultDisplayName() {
++  return `${os.userInfo().username} on ${os.hostname()}`;
++}
++
++function encryptDeviceToken(token) {
++  if (safeStorage.isEncryptionAvailable()) {
++    return {
++      deviceTokenEncrypted: safeStorage.encryptString(token).toString("base64"),
++      deviceToken: undefined,
++    };
++  }
++  return {
++    deviceToken: token,
++    deviceTokenEncrypted: undefined,
++  };
++}
++
++function decryptDeviceToken(config) {
++  if (config.deviceTokenEncrypted) {
++    return safeStorage.decryptString(Buffer.from(config.deviceTokenEncrypted, "base64"));
++  }
++  return config.deviceToken || "";
++}
++
++async function requestJson(url, { method = "GET", headers = {}, body, timeoutMs = 30000 } = {}) {
++  const controller = new AbortController();
++  const timer = setTimeout(() => controller.abort(), timeoutMs);
++  try {
++    const response = await fetch(url, {
++      method,
++      signal: controller.signal,
++      headers: {
++        Accept: "application/json",
++        ...headers,
++      },
++      body,
++    });
++    const text = await response.text();
++    const payload = text ? JSON.parse(text) : {};
++    if (!response.ok || payload?.ok === false) {
++      throw new Error(payload?.error?.message || `HTTP ${response.status}`);
++    }
++    return payload;
++  } finally {
++    clearTimeout(timer);
++  }
++}
++
++async function activateDevice({ registrationCode, controlPlaneUrl }) {
++  const baseUrl = normalizeBaseUrl(controlPlaneUrl);
++  const payload = await requestJson(`${baseUrl}/api/v1/device-agents/activate`, {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify({
++      registrationCode,
++      deviceId: defaultDeviceId(),
++      displayName: defaultDisplayName(),
++      hostname: os.hostname(),
++      platform: process.platform,
++      arch: process.arch,
++      osRelease: os.release(),
++      agentVersion: APP_VERSION,
++      capabilities: DEVICE_CAPABILITIES,
++    }),
++  });
++
++  const encryptedToken = encryptDeviceToken(payload.data.deviceToken);
++  const config = {
++    activated: true,
++    controlPlaneUrl: baseUrl,
++    user: payload.data.user,
++    agent: payload.data.agent,
++    ...encryptedToken,
++    activatedAt: new Date().toISOString(),
++    lastHeartbeatError: null,
++  };
++  writeConfig(config);
++  startHeartbeat();
++  startDeviceCommandPolling();
++  return safePublicConfig(config);
++}
++
++async function sendHeartbeat() {
++  const config = readConfig();
++  const deviceToken = decryptDeviceToken(config);
++  if (!config.activated || !deviceToken || !config.agent?.deviceId || !config.user?.id) {
++    return null;
++  }
++  const payload = await requestJson(`${normalizeBaseUrl(config.controlPlaneUrl)}/api/v1/device-agents/heartbeat`, {
++    method: "POST",
++    headers: {
++      "Content-Type": "application/json",
++      "X-Device-Agent-Token": deviceToken,
++    },
++    body: JSON.stringify({
++      userId: config.user.id,
++      deviceId: config.agent.deviceId,
++      displayName: config.agent.displayName || defaultDisplayName(),
++      hostname: os.hostname(),
++      platform: process.platform,
++      arch: process.arch,
++      osRelease: os.release(),
++      agentVersion: APP_VERSION,
++      capabilities: DEVICE_CAPABILITIES,
++    }),
++    timeoutMs: 20000,
++  });
++  const next = {
++    ...config,
++    agent: payload.data.agent || config.agent,
++    lastHeartbeatAt: new Date().toISOString(),
++    lastHeartbeatError: null,
++  };
++  writeConfig(next);
++  mainWindow?.webContents.send("agent:status", safePublicConfig(next));
++  return safePublicConfig(next);
++}
++
++function startHeartbeat() {
++  if (heartbeatTimer) {
++    clearInterval(heartbeatTimer);
++  }
++  const config = readConfig();
++  if (!config.activated) {
++    return;
++  }
++  sendHeartbeat().catch(storeHeartbeatError);
++  heartbeatTimer = setInterval(() => {
++    sendHeartbeat().catch(storeHeartbeatError);
++  }, HEARTBEAT_INTERVAL_MS);
++}
++
++function startDeviceCommandPolling() {
++  if (commandTimer) {
++    clearInterval(commandTimer);
++  }
++  const config = readConfig();
++  if (!config.activated) {
++    return;
++  }
++  pollDeviceCommands().catch(storeDeviceCommandError);
++  commandTimer = setInterval(() => {
++    pollDeviceCommands().catch(storeDeviceCommandError);
++  }, COMMAND_POLL_INTERVAL_MS);
++}
++
++function storeHeartbeatError(error) {
++  const failed = { ...readConfig(), lastHeartbeatError: error.message || String(error) };
++  writeConfig(failed);
++  mainWindow?.webContents.send("agent:status", safePublicConfig(failed));
++}
++
++function storeDeviceCommandError(error) {
++  const failed = { ...readConfig(), lastCommandError: error.message || String(error) };
++  writeConfig(failed);
++  mainWindow?.webContents.send("agent:status", safePublicConfig(failed));
++}
++
++async function pollDeviceCommands() {
++  const config = readConfig();
++  const deviceToken = decryptDeviceToken(config);
++  if (!config.activated || !deviceToken || !config.agent?.deviceId) {
++    return;
++  }
++
++  const payload = await requestJson(
++    `${normalizeBaseUrl(config.controlPlaneUrl)}/api/v1/device-agents/commands?deviceId=${encodeURIComponent(
++      config.agent.deviceId,
++    )}&limit=5`,
++    {
++      headers: {
++        "X-Device-Agent-Token": deviceToken,
++      },
++      timeoutMs: 20000,
++    },
++  );
++
++  const commands = Array.isArray(payload.data?.commands) ? payload.data.commands : [];
++  if (commands.length === 0) {
++    return;
++  }
++
++  for (const command of commands) {
++    let execution;
++    try {
++      execution = await executeDeviceCommand(command);
++    } catch (error) {
++      execution = {
++        status: "failed",
++        result: null,
++        error: error.message || String(error),
++      };
++    }
++    await submitDeviceCommandResult(config, deviceToken, command, execution);
++  }
++
++  const updated = { ...readConfig(), lastCommandAt: new Date().toISOString(), lastCommandError: null };
++  writeConfig(updated);
++  mainWindow?.webContents.send("agent:status", safePublicConfig(updated));
++}
++
++async function submitDeviceCommandResult(config, deviceToken, command, execution) {
++  await requestJson(
++    `${normalizeBaseUrl(config.controlPlaneUrl)}/api/v1/device-agents/commands/${encodeURIComponent(
++      command.id,
++    )}/result`,
++    {
++      method: "POST",
++      headers: {
++        "Content-Type": "application/json",
++        "X-Device-Agent-Token": deviceToken,
++      },
++      body: JSON.stringify({
++        deviceId: config.agent.deviceId,
++        status: execution.status,
++        result: execution.result || null,
++        error: execution.error || null,
++      }),
++      timeoutMs: 30000,
++    },
++  );
++}
++
++async function executeDeviceCommand(command) {
++  const args = command.args || {};
++  switch (command.type) {
++    case "open_app":
++      return succeed(await openApp(args));
++    case "close_app":
++      return succeed(await closeApp(args));
++    case "open_url":
++      return succeed(await openUrl(args));
++    case "open_file":
++      return succeed(await openFile(args));
++    case "list_running_apps":
++      return succeed(await listRunningApps());
++    case "active_window":
++      return succeed(await readActiveWindow());
++    case "screenshot":
++      return succeed(await takeScreenshot());
++    case "clipboard_get":
++      return succeed(await getClipboard());
++    case "clipboard_set":
++      return succeed(await setClipboard(args));
++    case "keyboard_type":
++      return succeed(await typeText(args));
++    case "hotkey":
++      return succeed(await pressHotkey(args));
++    case "mouse_click":
++      return succeed(await clickMouse(args));
++    case "ocr_screen":
++    case "openclaw_prompt":
++      return {
++        status: "unsupported",
++        result: null,
++        error: `${command.type} is not supported in this local build yet`,
++      };
++    default:
++      return {
++        status: "unsupported",
++        result: null,
++        error: `Unknown command type: ${command.type}`,
++      };
++  }
++}
++
++function succeed(result = {}) {
++  return { status: "succeeded", result, error: null };
++}
++
++async function openApp(args) {
++  const appName = readArg(args, ["app", "name", "path", "target"]);
++  if (!appName) {
++    throw new Error("open_app requires args.app");
++  }
++  await runPowerShell(`Start-Process -FilePath ${psString(appName)}`);
++  return { opened: appName };
++}
++
++async function closeApp(args) {
++  const appName = readArg(args, ["app", "name", "process", "processName"]);
++  if (!appName) {
++    throw new Error("close_app requires args.app");
++  }
++  const force = Boolean(args.force);
++  const imageName = appName.toLowerCase().endsWith(".exe") ? appName : `${appName}.exe`;
++  const flags = force ? "/T /F" : "/T";
++  await runPowerShell(`taskkill /IM ${psString(imageName)} ${flags}`);
++  return { closed: imageName, force };
++}
++
++async function openUrl(args) {
++  const url = readArg(args, ["url", "target"]);
++  if (!url) {
++    throw new Error("open_url requires args.url");
++  }
++  await shell.openExternal(url);
++  return { opened: url };
++}
++
++async function openFile(args) {
++  const filePath = readArg(args, ["path", "file", "target"]);
++  if (!filePath) {
++    throw new Error("open_file requires args.path");
++  }
++  const error = await shell.openPath(filePath);
++  if (error) {
++    throw new Error(error);
++  }
++  return { opened: filePath };
++}
++
++async function listRunningApps() {
++  const script = [
++    "Get-Process |",
++    "Sort-Object ProcessName |",
++    "Select-Object -First 120 ProcessName, Id, MainWindowTitle |",
++    "ConvertTo-Json -Compress",
++  ].join(" ");
++  const { stdout } = await runPowerShell(script, { timeoutMs: 15000, maxBuffer: 2 * 1024 * 1024 });
++  return { processes: parseJsonMaybe(stdout) || [] };
++}
++
++async function readActiveWindow() {
++  const script = `
++Add-Type @"
++using System;
++using System.Text;
++using System.Runtime.InteropServices;
++public class Win32Window {
++  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
++  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
++  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
++}
++"@
++$handle = [Win32Window]::GetForegroundWindow()
++$builder = New-Object System.Text.StringBuilder 1024
++[void][Win32Window]::GetWindowText($handle, $builder, $builder.Capacity)
++$processId = 0
++[void][Win32Window]::GetWindowThreadProcessId($handle, [ref]$processId)
++$process = Get-Process -Id $processId -ErrorAction SilentlyContinue
++[PSCustomObject]@{ title = $builder.ToString(); processId = $processId; processName = $process.ProcessName } | ConvertTo-Json -Compress
++`;
++  const { stdout } = await runPowerShell(script, { timeoutMs: 15000 });
++  return { window: parseJsonMaybe(stdout) || null };
++}
++
++async function takeScreenshot() {
++  const outputPath = path.join(os.tmpdir(), `starlab-openclaw-shot-${Date.now()}.png`);
++  const script = `
++Add-Type -AssemblyName System.Windows.Forms
++Add-Type -AssemblyName System.Drawing
++$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
++$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
++$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
++$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
++$bitmap.Save(${psString(outputPath)}, [System.Drawing.Imaging.ImageFormat]::Png)
++$graphics.Dispose()
++$bitmap.Dispose()
++`;
++  await runPowerShell(script, { timeoutMs: 30000 });
++  const base64 = fs.readFileSync(outputPath).toString("base64");
++  fs.rmSync(outputPath, { force: true });
++  return {
++    mimeType: "image/png",
++    filename: path.basename(outputPath),
++    base64,
++  };
++}
++
++async function getClipboard() {
++  const { stdout } = await runPowerShell("Get-Clipboard -Raw", { timeoutMs: 10000 });
++  return { text: stdout.replace(/\r?\n$/u, "") };
++}
++
++async function setClipboard(args) {
++  const text = readArg(args, ["text", "value", "content"]);
++  await runPowerShell(`Set-Clipboard -Value ${psString(text || "")}`, { timeoutMs: 10000 });
++  return { ok: true };
++}
++
++async function typeText(args) {
++  const text = readArg(args, ["text", "value"]);
++  if (!text) {
++    throw new Error("keyboard_type requires args.text");
++  }
++  await setClipboard({ text });
++  await runPowerShell(`
++Add-Type -AssemblyName System.Windows.Forms
++[System.Windows.Forms.SendKeys]::SendWait("^v")
++`, { timeoutMs: 10000 });
++  return { typed: text.length, method: "clipboard-paste" };
++}
++
++async function pressHotkey(args) {
++  const keys = normalizeKeys(args.keys || args.hotkey || args.combo);
++  if (keys.length === 0) {
++    throw new Error("hotkey requires args.keys");
++  }
++  const sendKeys = toWindowsSendKeys(keys);
++  await runPowerShell(`
++Add-Type -AssemblyName System.Windows.Forms
++[System.Windows.Forms.SendKeys]::SendWait(${psString(sendKeys)})
++`, { timeoutMs: 10000 });
++  return { keys, sendKeys };
++}
++
++async function clickMouse(args) {
++  const x = Number(args.x);
++  const y = Number(args.y);
++  if (!Number.isFinite(x) || !Number.isFinite(y)) {
++    throw new Error("mouse_click requires numeric args.x and args.y");
++  }
++  const button = String(args.button || "left").toLowerCase();
++  const down = button === "right" ? "0x0008" : "0x0002";
++  const up = button === "right" ? "0x0010" : "0x0004";
++  await runPowerShell(`
++Add-Type @"
++using System.Runtime.InteropServices;
++public class MouseControl {
++  [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
++  [DllImport("user32.dll")] public static extern void mouse_event(int dwFlags, int dx, int dy, int dwData, int dwExtraInfo);
++}
++"@
++[MouseControl]::SetCursorPos(${Math.round(x)}, ${Math.round(y)}) | Out-Null
++[MouseControl]::mouse_event(${down}, 0, 0, 0, 0)
++[MouseControl]::mouse_event(${up}, 0, 0, 0, 0)
++`, { timeoutMs: 10000 });
++  return { x: Math.round(x), y: Math.round(y), button };
++}
++
++function runPowerShell(script, { timeoutMs = 15000, maxBuffer = 10 * 1024 * 1024 } = {}) {
++  const encoded = Buffer.from(script, "utf16le").toString("base64");
++  return execFileAsync(
++    "powershell.exe",
++    ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
++    { timeout: timeoutMs, windowsHide: true, maxBuffer },
++  );
++}
++
++function execFileAsync(command, args, options) {
++  return new Promise((resolve, reject) => {
++    execFile(command, args, options, (error, stdout, stderr) => {
++      if (error) {
++        error.stdout = stdout;
++        error.stderr = stderr;
++        reject(error);
++        return;
++      }
++      resolve({ stdout: String(stdout || ""), stderr: String(stderr || "") });
++    });
++  });
++}
++
++function readArg(args, names) {
++  for (const name of names) {
++    if (args[name] !== undefined && args[name] !== null && String(args[name]).trim()) {
++      return String(args[name]).trim();
++    }
++  }
++  return "";
++}
++
++function psString(value) {
++  return `'${String(value ?? "").replace(/'/gu, "''")}'`;
++}
++
++function parseJsonMaybe(value) {
++  const trimmed = String(value || "").trim();
++  if (!trimmed) {
++    return null;
++  }
++  try {
++    return JSON.parse(trimmed);
++  } catch {
++    return trimmed;
++  }
++}
++
++function normalizeKeys(value) {
++  if (Array.isArray(value)) {
++    return value.map((item) => String(item).trim().toLowerCase()).filter(Boolean);
++  }
++  return String(value || "")
++    .split(/[+\s,]+/u)
++    .map((item) => item.trim().toLowerCase())
++    .filter(Boolean);
++}
++
++function toWindowsSendKeys(keys) {
++  const modifiers = {
++    ctrl: "^",
++    control: "^",
++    cmd: "^",
++    command: "^",
++    win: "^",
++    alt: "%",
++    option: "%",
++    shift: "+",
++  };
++  const special = {
++    enter: "{ENTER}",
++    return: "{ENTER}",
++    tab: "{TAB}",
++    esc: "{ESC}",
++    escape: "{ESC}",
++    backspace: "{BACKSPACE}",
++    delete: "{DELETE}",
++    space: " ",
++    left: "{LEFT}",
++    right: "{RIGHT}",
++    up: "{UP}",
++    down: "{DOWN}",
++  };
++  let prefix = "";
++  let key = "";
++  for (const item of keys) {
++    if (modifiers[item]) {
++      prefix += modifiers[item];
++    } else {
++      key = special[item] || item;
++    }
++  }
++  if (!key) {
++    throw new Error("hotkey requires a non-modifier key");
++  }
++  return `${prefix}${key}`;
++}
++
++async function askAssistant(text) {
++  const config = readConfig();
++  const deviceToken = decryptDeviceToken(config);
++  if (!config.activated || !deviceToken) {
++    throw new Error("Сначала активируйте агент registration code.");
++  }
++  const payload = await requestJson(`${normalizeBaseUrl(config.controlPlaneUrl)}/api/v1/local-agent/chat`, {
++    method: "POST",
++    headers: {
++      "Content-Type": "application/json",
++      "X-Device-Agent-Token": deviceToken,
++    },
++    body: JSON.stringify({
++      deviceId: config.agent.deviceId,
++      text,
++    }),
++    timeoutMs: 60000,
++  });
++  return payload.data.answer;
++}
++
++function safePublicConfig(config) {
++  return {
++    activated: Boolean(config.activated),
++    controlPlaneUrl: config.controlPlaneUrl || DEFAULT_CONTROL_PLANE_URL,
++    user: config.user || null,
++    agent: config.agent || null,
++    activatedAt: config.activatedAt || null,
++    lastHeartbeatAt: config.lastHeartbeatAt || null,
++    lastHeartbeatError: config.lastHeartbeatError || null,
++    lastCommandAt: config.lastCommandAt || null,
++    lastCommandError: config.lastCommandError || null,
++    tokenStorage: config.deviceTokenEncrypted ? "encrypted" : config.deviceToken ? "plain" : "none",
++    version: APP_VERSION,
++    configPath: configPath(),
++  };
++}
++
++function createWindow() {
++  mainWindow = new BrowserWindow({
++    width: 1060,
++    height: 760,
++    minWidth: 920,
++    minHeight: 640,
++    title: "Starlab OpenClaw Agent",
++    backgroundColor: "#f4f7fb",
++    autoHideMenuBar: true,
++    webPreferences: {
++      preload: path.join(__dirname, "preload.cjs"),
++      contextIsolation: true,
++      nodeIntegration: false,
++    },
++  });
++  mainWindow.loadFile(path.join(__dirname, "renderer.html"));
++}
++
++app.whenReady().then(() => {
++  ipcMain.handle("agent:getStatus", () => safePublicConfig(readConfig()));
++  ipcMain.handle("agent:activate", (_event, input) => activateDevice(input || {}));
++  ipcMain.handle("agent:heartbeat", () => sendHeartbeat());
++  ipcMain.handle("agent:ask", (_event, text) => askAssistant(text));
++  ipcMain.handle("agent:reset", () => {
++    fs.rmSync(configPath(), { force: true });
++    if (heartbeatTimer) {
++      clearInterval(heartbeatTimer);
++      heartbeatTimer = null;
++    }
++    if (commandTimer) {
++      clearInterval(commandTimer);
++      commandTimer = null;
++    }
++    return safePublicConfig(readConfig());
++  });
++  ipcMain.handle("agent:openExternal", (_event, url) => shell.openExternal(url));
++
++  createWindow();
++  startHeartbeat();
++  startDeviceCommandPolling();
++});
++
++app.on("window-all-closed", () => {
++  if (process.platform !== "darwin") {
++    app.quit();
++  }
++});
++
++app.on("activate", () => {
++  if (BrowserWindow.getAllWindows().length === 0) {
++    createWindow();
++  }
++});
+diff --git a/apps/windows/src/preload.cjs b/apps/windows/src/preload.cjs
+new file mode 100644
+index 0000000000..824e7730fd
+--- /dev/null
++++ b/apps/windows/src/preload.cjs
+@@ -0,0 +1,15 @@
++const { contextBridge, ipcRenderer } = require("electron");
++
++contextBridge.exposeInMainWorld("starlabAgent", {
++  getStatus: () => ipcRenderer.invoke("agent:getStatus"),
++  activate: (input) => ipcRenderer.invoke("agent:activate", input),
++  heartbeat: () => ipcRenderer.invoke("agent:heartbeat"),
++  ask: (text) => ipcRenderer.invoke("agent:ask", text),
++  reset: () => ipcRenderer.invoke("agent:reset"),
++  openExternal: (url) => ipcRenderer.invoke("agent:openExternal", url),
++  onStatus: (callback) => {
++    const listener = (_event, status) => callback(status);
++    ipcRenderer.on("agent:status", listener);
++    return () => ipcRenderer.removeListener("agent:status", listener);
++  },
++});
+diff --git a/apps/windows/src/renderer.html b/apps/windows/src/renderer.html
+new file mode 100644
+index 0000000000..0fb15ac290
+--- /dev/null
++++ b/apps/windows/src/renderer.html
+@@ -0,0 +1,90 @@
++<!doctype html>
++<html lang="ru">
++<head>
++  <meta charset="utf-8">
++  <meta name="viewport" content="width=device-width, initial-scale=1">
++  <title>Starlab OpenClaw Agent</title>
++  <link rel="stylesheet" href="./styles.css">
++</head>
++<body>
++  <aside class="sidebar">
++    <div class="brand">
++      <div class="mark">OC</div>
++      <div>
++        <div class="brand-title">OpenClaw Agent</div>
++        <div class="brand-subtitle">Starlab Desktop</div>
++      </div>
++    </div>
++
++    <section class="status-card">
++      <div class="status-row">
++        <span id="statusDot" class="dot"></span>
++        <span id="statusText">Проверка...</span>
++      </div>
++      <dl>
++        <div>
++          <dt>Пользователь</dt>
++          <dd id="userText">-</dd>
++        </div>
++        <div>
++          <dt>Роль</dt>
++          <dd id="roleText">-</dd>
++        </div>
++        <div>
++          <dt>Устройство</dt>
++          <dd id="deviceText">-</dd>
++        </div>
++        <div>
++          <dt>Token storage</dt>
++          <dd id="tokenStorageText">-</dd>
++        </div>
++        <div>
++          <dt>Heartbeat</dt>
++          <dd id="heartbeatText">-</dd>
++        </div>
++      </dl>
++      <button id="heartbeatButton" class="ghost-button" type="button">Обновить статус</button>
++    </section>
++
++    <button id="resetButton" class="danger-button" type="button">Сбросить активацию</button>
++  </aside>
++
++  <main class="main">
++    <section id="activationPanel" class="panel">
++      <div class="panel-header">
++        <p class="eyebrow">Первый запуск</p>
++        <h1>Введите registration code</h1>
++        <p>Код выдаёт Николай. После активации приложение привяжет этот компьютер к сотруднику, роли и общей памяти серверного агента.</p>
++      </div>
++
++      <form id="activationForm" class="activation-form">
++        <label for="serverUrl">Сервер</label>
++        <input id="serverUrl" name="serverUrl" autocomplete="off" value="https://starlabagent.pp.ua">
++
++        <label for="registrationCode">Registration code</label>
++        <input id="registrationCode" name="registrationCode" autocomplete="one-time-code" placeholder="Например: WIOD23WED" required>
++
++        <button id="activateButton" class="primary-button" type="submit">Активировать агент</button>
++      </form>
++      <div id="activationMessage" class="message"></div>
++    </section>
++
++    <section id="chatPanel" class="panel chat-panel hidden">
++      <div class="panel-header compact">
++        <p class="eyebrow">Рабочий ассистент</p>
++        <h1>Спросите агента</h1>
++        <p>Он использует тот же серверный контекст, что Telegram-бот: Bitrix, Google, устройства, роли, отчёты и общую память.</p>
++      </div>
++
++      <div id="messages" class="messages"></div>
++
++      <form id="chatForm" class="chat-form">
++        <textarea id="question" rows="3" placeholder="Например: дай сводку по Максату за неделю по календарю и Bitrix"></textarea>
++        <button id="askButton" class="primary-button" type="submit">Отправить</button>
++      </form>
++    </section>
++  </main>
++
++  <script src="./renderer.js"></script>
++</body>
++</html>
+diff --git a/apps/windows/src/renderer.js b/apps/windows/src/renderer.js
+new file mode 100644
+index 0000000000..9c9af8ce05
+--- /dev/null
++++ b/apps/windows/src/renderer.js
+@@ -0,0 +1,153 @@
++const activationPanel = document.getElementById("activationPanel");
++const chatPanel = document.getElementById("chatPanel");
++const activationForm = document.getElementById("activationForm");
++const activationMessage = document.getElementById("activationMessage");
++const activateButton = document.getElementById("activateButton");
++const serverUrl = document.getElementById("serverUrl");
++const registrationCode = document.getElementById("registrationCode");
++const statusDot = document.getElementById("statusDot");
++const statusText = document.getElementById("statusText");
++const userText = document.getElementById("userText");
++const roleText = document.getElementById("roleText");
++const deviceText = document.getElementById("deviceText");
++const tokenStorageText = document.getElementById("tokenStorageText");
++const heartbeatText = document.getElementById("heartbeatText");
++const heartbeatButton = document.getElementById("heartbeatButton");
++const resetButton = document.getElementById("resetButton");
++const chatForm = document.getElementById("chatForm");
++const question = document.getElementById("question");
++const askButton = document.getElementById("askButton");
++const messages = document.getElementById("messages");
++
++let currentStatus = null;
++
++init().catch((error) => {
++  setActivationMessage(error.message || String(error), "bad");
++});
++
++async function init() {
++  currentStatus = await window.starlabAgent.getStatus();
++  renderStatus(currentStatus);
++  window.starlabAgent.onStatus((status) => {
++    currentStatus = status;
++    renderStatus(status);
++  });
++}
++
++activationForm.addEventListener("submit", async (event) => {
++  event.preventDefault();
++  activateButton.disabled = true;
++  setActivationMessage("Проверяю код и привязываю устройство...", "");
++  try {
++    const status = await window.starlabAgent.activate({
++      controlPlaneUrl: serverUrl.value,
++      registrationCode: registrationCode.value.trim(),
++    });
++    currentStatus = status;
++    renderStatus(status);
++    setActivationMessage("Готово. Агент активирован.", "ok");
++    appendMessage("Устройство подключено. Теперь можно общаться с ассистентом.", "agent");
++  } catch (error) {
++    setActivationMessage(error.message || String(error), "bad");
++  } finally {
++    activateButton.disabled = false;
++  }
++});
++
++heartbeatButton.addEventListener("click", async () => {
++  heartbeatButton.disabled = true;
++  try {
++    const status = await window.starlabAgent.heartbeat();
++    if (status) {
++      currentStatus = status;
++      renderStatus(status);
++    }
++  } catch (error) {
++    renderStatus({ ...currentStatus, lastHeartbeatError: error.message || String(error) });
++  } finally {
++    heartbeatButton.disabled = false;
++  }
++});
++
++resetButton.addEventListener("click", async () => {
++  const ok = confirm("Сбросить активацию этого устройства?");
++  if (!ok) {
++    return;
++  }
++  currentStatus = await window.starlabAgent.reset();
++  messages.innerHTML = "";
++  renderStatus(currentStatus);
++});
++
++chatForm.addEventListener("submit", async (event) => {
++  event.preventDefault();
++  const text = question.value.trim();
++  if (!text) {
++    return;
++  }
++  question.value = "";
++  appendMessage(text, "user");
++  askButton.disabled = true;
++  const pending = appendMessage("Думаю...", "agent");
++  try {
++    const answer = await window.starlabAgent.ask(text);
++    pending.textContent = answer || "Пустой ответ";
++  } catch (error) {
++    pending.className = "bubble error";
++    pending.textContent = error.message || String(error);
++  } finally {
++    askButton.disabled = false;
++  }
++});
++
++function renderStatus(status) {
++  const activated = Boolean(status?.activated);
++  activationPanel.classList.toggle("hidden", activated);
++  chatPanel.classList.toggle("hidden", !activated);
++  serverUrl.value = status?.controlPlaneUrl || "https://starlabagent.pp.ua";
++
++  statusDot.className = "dot";
++  if (!activated) {
++    statusDot.classList.add("warn");
++    statusText.textContent = "Не активирован";
++  } else if (status.lastHeartbeatError) {
++    statusDot.classList.add("bad");
++    statusText.textContent = "Ошибка связи";
++  } else {
++    statusDot.classList.add("ok");
++    statusText.textContent = "Активен";
++  }
++
++  userText.textContent = status?.user?.displayName || "-";
++  roleText.textContent = status?.user?.role || "-";
++  deviceText.textContent = status?.agent?.displayName || status?.agent?.deviceId || "-";
++  tokenStorageText.textContent = status?.tokenStorage || "-";
++  heartbeatText.textContent = status?.lastHeartbeatError
++    ? status.lastHeartbeatError
++    : formatDate(status?.lastHeartbeatAt);
++}
++
++function setActivationMessage(text, kind) {
++  activationMessage.textContent = text;
++  activationMessage.className = `message ${kind || ""}`.trim();
++}
++
++function appendMessage(text, kind) {
++  const item = document.createElement("div");
++  item.className = `bubble ${kind}`;
++  item.textContent = text;
++  messages.appendChild(item);
++  messages.scrollTop = messages.scrollHeight;
++  return item;
++}
++
++function formatDate(value) {
++  if (!value) {
++    return "-";
++  }
++  const date = new Date(value);
++  if (Number.isNaN(date.getTime())) {
++    return value;
++  }
++  return date.toLocaleString("ru-RU");
++}
+diff --git a/apps/windows/src/styles.css b/apps/windows/src/styles.css
+new file mode 100644
+index 0000000000..d2b1eb829e
+--- /dev/null
++++ b/apps/windows/src/styles.css
+@@ -0,0 +1,288 @@
++:root {
++  color-scheme: light;
++  --bg: #eef3f8;
++  --sidebar: #101a2b;
++  --sidebar-soft: #1a2941;
++  --panel: #ffffff;
++  --text: #162033;
++  --muted: #667085;
++  --line: #d8e0ec;
++  --accent: #1267d8;
++  --accent-strong: #0d4fa8;
++  --ok: #0e7c66;
++  --bad: #b42318;
++  --warn: #b66a00;
++}
++
++* { box-sizing: border-box; }
++
++body {
++  margin: 0;
++  min-height: 100vh;
++  display: grid;
++  grid-template-columns: 320px minmax(0, 1fr);
++  background: var(--bg);
++  color: var(--text);
++  font-family: "Segoe UI", Arial, sans-serif;
++}
++
++.sidebar {
++  background: var(--sidebar);
++  color: #f8fbff;
++  padding: 22px;
++  display: flex;
++  flex-direction: column;
++  gap: 18px;
++}
++
++.brand {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  min-height: 52px;
++}
++
++.mark {
++  width: 44px;
++  height: 44px;
++  border-radius: 8px;
++  display: grid;
++  place-items: center;
++  background: #e54b4b;
++  color: #fff;
++  font-weight: 800;
++}
++
++.brand-title {
++  font-weight: 800;
++  font-size: 18px;
++}
++
++.brand-subtitle {
++  color: #aab7ca;
++  font-size: 13px;
++}
++
++.status-card {
++  background: var(--sidebar-soft);
++  border: 1px solid rgba(255,255,255,.08);
++  border-radius: 8px;
++  padding: 16px;
++}
++
++.status-row {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  font-weight: 700;
++  margin-bottom: 14px;
++}
++
++.dot {
++  width: 10px;
++  height: 10px;
++  border-radius: 999px;
++  background: #98a2b3;
++}
++
++.dot.ok { background: #17b26a; }
++.dot.bad { background: #f04438; }
++.dot.warn { background: #f79009; }
++
++dl {
++  margin: 0;
++  display: grid;
++  gap: 12px;
++}
++
++dt {
++  color: #9fb0c7;
++  font-size: 12px;
++  margin-bottom: 3px;
++}
++
++dd {
++  margin: 0;
++  color: #fff;
++  font-size: 14px;
++  overflow-wrap: anywhere;
++}
++
++button {
++  font: inherit;
++}
++
++.ghost-button,
++.danger-button,
++.primary-button {
++  border: 0;
++  min-height: 42px;
++  border-radius: 6px;
++  padding: 10px 14px;
++  font-weight: 750;
++  cursor: pointer;
++}
++
++.ghost-button {
++  width: 100%;
++  margin-top: 16px;
++  background: rgba(255,255,255,.1);
++  color: #fff;
++}
++
++.danger-button {
++  margin-top: auto;
++  background: rgba(240,68,56,.12);
++  color: #ffb4ad;
++  border: 1px solid rgba(240,68,56,.3);
++}
++
++.primary-button {
++  background: var(--accent);
++  color: #fff;
++}
++
++.primary-button:hover {
++  background: var(--accent-strong);
++}
++
++.primary-button:disabled,
++.ghost-button:disabled {
++  opacity: .65;
++  cursor: default;
++}
++
++.main {
++  min-width: 0;
++  padding: 28px;
++  display: grid;
++  align-items: stretch;
++}
++
++.panel {
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: 8px;
++  padding: 24px;
++  min-height: calc(100vh - 56px);
++  display: flex;
++  flex-direction: column;
++}
++
++.panel-header {
++  max-width: 760px;
++}
++
++.panel-header.compact {
++  max-width: none;
++}
++
++.eyebrow {
++  margin: 0 0 8px;
++  color: var(--accent);
++  font-weight: 800;
++  font-size: 13px;
++  text-transform: uppercase;
++}
++
++h1 {
++  margin: 0 0 10px;
++  font-size: 32px;
++  line-height: 1.15;
++  letter-spacing: 0;
++}
++
++p {
++  color: var(--muted);
++  line-height: 1.55;
++  margin: 0;
++}
++
++.activation-form {
++  display: grid;
++  gap: 10px;
++  margin-top: 28px;
++  max-width: 560px;
++}
++
++label {
++  font-weight: 750;
++  margin-top: 8px;
++}
++
++input,
++textarea {
++  width: 100%;
++  border: 1px solid #bcc8d8;
++  border-radius: 6px;
++  padding: 12px;
++  color: var(--text);
++  font: inherit;
++}
++
++textarea {
++  resize: vertical;
++  min-height: 76px;
++}
++
++.message {
++  margin-top: 16px;
++  white-space: pre-wrap;
++}
++
++.message.ok { color: var(--ok); }
++.message.bad { color: var(--bad); }
++
++.hidden {
++  display: none;
++}
++
++.chat-panel {
++  gap: 18px;
++}
++
++.messages {
++  flex: 1;
++  min-height: 240px;
++  overflow-y: auto;
++  border: 1px solid var(--line);
++  border-radius: 8px;
++  background: #f8fafc;
++  padding: 16px;
++  display: flex;
++  flex-direction: column;
++  gap: 12px;
++}
++
++.bubble {
++  max-width: 86%;
++  padding: 12px 14px;
++  border-radius: 8px;
++  line-height: 1.5;
++  white-space: pre-wrap;
++}
++
++.bubble.user {
++  align-self: flex-end;
++  background: #dcecff;
++}
++
++.bubble.agent {
++  align-self: flex-start;
++  background: #fff;
++  border: 1px solid var(--line);
++}
++
++.bubble.error {
++  align-self: flex-start;
++  background: #fff1f0;
++  color: var(--bad);
++  border: 1px solid #ffc9c4;
++}
++
++.chat-form {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) 140px;
++  gap: 12px;
++  align-items: end;
++}
+diff --git a/package.json b/package.json
+index 33b9970798..1e9fefd4a1 100644
+--- a/package.json
++++ b/package.json
+@@ -1591,6 +1591,10 @@
+     "mac:open": "open dist/OpenClaw.app",
+     "mac:package": "bash scripts/package-mac-app.sh",
+     "mac:restart": "bash scripts/restart-mac.sh",
++    "starlab:mac:package": "bash scripts/package-starlab-mac-dist.sh",
++    "starlab:windows:install": "cd apps/windows && npm install",
++    "starlab:windows:build": "cd apps/windows && npm run build:win",
++    "starlab:linux:build": "cd apps/windows && npm run build:linux",
+     "moltbot:rpc": "node scripts/run-node.mjs agent --mode rpc --json",
+     "openclaw": "node scripts/run-node.mjs",
+     "openclaw:rpc": "node scripts/run-node.mjs agent --mode rpc --json",
+diff --git a/scripts/package-starlab-mac-dist.sh b/scripts/package-starlab-mac-dist.sh
+new file mode 100644
+index 0000000000..a24fafaefd
+--- /dev/null
++++ b/scripts/package-starlab-mac-dist.sh
+@@ -0,0 +1,55 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++# Build the Starlab-flavoured OpenClaw macOS app from the existing Swift target.
++#
++# Output:
++# - dist/OpenClaw.app
++# - dist/OpenClaw-<version>.dmg
++#
++# For internal builds without an Apple certificate this script defaults to ad-hoc
++# signing and skips notarization. For production notarized builds set:
++#   SIGN_IDENTITY="Developer ID Application: ..."
++#   SKIP_NOTARIZE=0
++
++ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
++
++export BUNDLE_ID="${BUNDLE_ID:-com.starlab.openclaw.agent}"
++export BUILD_CONFIG="${BUILD_CONFIG:-release}"
++export BUILD_ARCHS="${BUILD_ARCHS:-all}"
++export ALLOW_ADHOC_SIGNING="${ALLOW_ADHOC_SIGNING:-1}"
++export SKIP_NOTARIZE="${SKIP_NOTARIZE:-1}"
++export SKIP_DSYM="${SKIP_DSYM:-1}"
++export SKIP_DMG="${SKIP_DMG:-1}"
++export DMG_VOLUME_NAME="${DMG_VOLUME_NAME:-Starlab OpenClaw Agent}"
++
++"$ROOT_DIR/scripts/package-mac-dist.sh"
++
++VERSION="$(node -p "require('$ROOT_DIR/package.json').version")"
++APP="$ROOT_DIR/dist/OpenClaw.app"
++SOURCE_DMG="$ROOT_DIR/dist/OpenClaw-$VERSION.dmg"
++TARGET_DMG="$ROOT_DIR/dist/starlab-openclaw-agent-macos-universal.dmg"
++
++create_simple_dmg() {
++  local staging
++  staging="$(mktemp -d "$ROOT_DIR/dist/starlab-dmg.XXXXXX")"
++  cp -R "$APP" "$staging/OpenClaw.app"
++  ln -s /Applications "$staging/Applications"
++  rm -f "$SOURCE_DMG" "$TARGET_DMG"
++  hdiutil create \
++    -volname "$DMG_VOLUME_NAME" \
++    -srcfolder "$staging" \
++    -ov \
++    -format UDZO \
++    "$SOURCE_DMG"
++  rm -rf "$staging"
++}
++
++if [[ ! -f "$SOURCE_DMG" ]]; then
++  create_simple_dmg
++fi
++
++if [[ -f "$SOURCE_DMG" ]]; then
++  cp "$SOURCE_DMG" "$TARGET_DMG"
++  echo "Starlab macOS DMG: $TARGET_DMG"
++fi

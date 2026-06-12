@@ -1,0 +1,896 @@
+import { summarizeTasks } from "../domain/bitrix-reports.js";
+import { buildEmployeeKpi, ensurePlatrumAnalyticsState, summarizePlatrumTasks } from "../domain/platrum-reports.js";
+import { buildDailyAssistantContext } from "../domain/daily-assistant.js";
+import {
+  buildAssistantMemoryContext,
+  buildRecentDeviceCommandMemory,
+  recordAssistantMemoryEvent,
+} from "../domain/assistant-memory.js";
+import { listVisibleDeviceAgents } from "../domain/device-agents.js";
+import { unauthorized } from "../domain/errors.js";
+import { appendAuditEvent } from "../infra/audit.js";
+import { recordTokenUsageEvent } from "../domain/token-usage.js";
+import {
+  canAccessProject,
+  listAccessibleUserIds,
+  publicProject,
+  publicUser,
+} from "../domain/policy.js";
+
+const MAX_CONTEXT_USERS = 8;
+const MAX_CONTEXT_PROJECTS = 6;
+const MAX_TASKS_PER_PROJECT = 12;
+const MAX_GOOGLE_CONTEXT_USERS = 5;
+const USER_ALIASES = Object.freeze({
+  "u-nikolay": ["николай", "николая", "николаю", "nikolay", "nikolai"],
+  "u-maksat": ["максат", "максата", "максату", "maksat"],
+  "u-pm-1": ["бегайым", "бегайым пм", "begayym", "begoim", "project manager 1", "pm1", "пм1"],
+  "u-pm-2": ["project manager 2", "pm2", "пм2"],
+  "u-pm-3": ["project manager 3", "pm3", "пм3"],
+});
+
+export async function answerCompanyAssistant({
+  store,
+  telegramUserId,
+  actorUserId,
+  question,
+  claudeClient,
+  kickidlerClient,
+  bitrixClient,
+  platrumClient,
+  googleOAuthService,
+  now = new Date(),
+}) {
+  const trimmedQuestion = String(question || "").trim();
+  if (!trimmedQuestion) {
+    return "Напиши вопрос текстом. Например: «Как сегодня работала Бегайым?»";
+  }
+
+  const state = await store.load();
+  const actor = actorUserId
+    ? resolveActorByUserId(state, actorUserId)
+    : resolveActorByTelegramId(state, telegramUserId);
+  const context = await buildAssistantContext({
+    state,
+    actor,
+    question: trimmedQuestion,
+    kickidlerClient,
+    bitrixClient,
+    platrumClient,
+    googleOAuthService,
+    now,
+  });
+
+  const completion = await claudeClient.complete({
+    system: buildSystemPrompt(),
+    user: buildUserPrompt({ question: trimmedQuestion, context }),
+  });
+
+  await store.update((currentState) => {
+    appendAuditEvent(currentState, {
+      actorUserId: actor.id,
+      actorTelegramUserId: actor.telegram?.telegramUserId,
+      action: actorUserId ? "local_agent.assistant.ask" : "telegram.assistant.ask",
+      target: {
+        targetUserIds: context.targetUsers.map((user) => user.id),
+        projectIds: context.projects.map((project) => project.id),
+      },
+      metadata: {
+        claudeConfigured: completion.configured,
+        model: completion.model,
+      },
+    });
+
+    if (completion.usage) {
+      const totalTokens =
+        completion.usage.inputTokens +
+        completion.usage.outputTokens +
+        completion.usage.cacheReadTokens +
+        completion.usage.cacheWriteTokens;
+      recordTokenUsageEvent(currentState, {
+        userId: actor.id,
+        action: actorUserId ? "local_agent.assistant" : "telegram.assistant",
+        source: actorUserId ? "local-openclaw-agent" : "telegram-bot",
+        provider: "anthropic",
+        model: completion.model,
+        inputTokens: completion.usage.inputTokens,
+        outputTokens: completion.usage.outputTokens,
+        cacheReadTokens: completion.usage.cacheReadTokens,
+        cacheWriteTokens: completion.usage.cacheWriteTokens,
+        totalTokens,
+        metadata: {
+          targetUserIds: context.targetUsers.map((user) => user.id),
+          projectIds: context.projects.map((project) => project.id),
+        },
+      }, { now });
+    }
+    const channel = actorUserId ? "local-agent" : "telegram";
+    recordAssistantMemoryEvent(currentState, {
+      userId: actor.id,
+      channel,
+      role: "user",
+      kind: "assistant_question",
+      text: trimmedQuestion,
+      target: {
+        userIds: context.targetUsers.map((user) => user.id),
+        projectIds: context.projects.map((project) => project.id),
+      },
+      metadata: {
+        model: completion.model,
+      },
+      now,
+    });
+    recordAssistantMemoryEvent(currentState, {
+      userId: actor.id,
+      channel,
+      role: "assistant",
+      kind: "assistant_answer",
+      text: completion.text,
+      target: {
+        userIds: context.targetUsers.map((user) => user.id),
+        projectIds: context.projects.map((project) => project.id),
+      },
+      metadata: {
+        model: completion.model,
+      },
+      now,
+    });
+    recordAssistantPlatrumSnapshots(currentState, { context, now });
+  });
+
+  return completion.text;
+}
+
+export async function buildAssistantContext({
+  state,
+  actor,
+  question,
+  kickidlerClient,
+  bitrixClient,
+  platrumClient,
+  googleOAuthService,
+  now = new Date(),
+}) {
+  const accessibleUserIds = new Set(listAccessibleUserIds(state, actor));
+  const accessibleUsers = state.users
+    .filter((user) => accessibleUserIds.has(user.id))
+    .slice(0, MAX_CONTEXT_USERS);
+  const visibleDevices = listVisibleDeviceAgents(state, actor);
+  const targetUsers = resolveTargetUsers({ state, actor, question, accessibleUsers, visibleDevices });
+  const projects = resolveRelevantProjects({ state, actor, targetUsers, question });
+  const period = resolveQuestionPeriod(question, now);
+  const metricon = await readMetriconContext({ targetUsers, period, kickidlerClient });
+  const platrum = await readPlatrumContext({ projects, targetUsers, period, platrumClient });
+  const bitrix = await readBitrixContext({ projects, bitrixClient });
+  const bitrixUserTasks = await readBitrixUserTasksContext({ targetUsers, bitrixClient });
+  const googleContextUsers = resolveGoogleContextUsers({ targetUsers, accessibleUsers, question });
+  const calendarSearchTerms = buildCalendarSearchTerms({ question, targetUsers, visibleDevices });
+  const googleWorkspace = await readGoogleWorkspaceContext({
+    users: googleContextUsers,
+    period,
+    googleOAuthService,
+    calendarSearchTerms,
+  });
+  const dailyAssistant = buildDailyAssistantContext(state, { targetUsers, now });
+  const memory = buildAssistantMemoryContext(state, { actor, targetUsers });
+  const recentDeviceCommands = buildRecentDeviceCommandMemory(state, { actor, targetUsers });
+
+  return {
+    now: now.toISOString(),
+    actor: publicUser(actor),
+    accessPolicy: describeAccessPolicy(actor.role),
+    period,
+    accessibleUsers: accessibleUsers.map((user) => publicUser(user)),
+    targetUsers: targetUsers.map((user) => publicUser(user)),
+    visibleDevices,
+    projects: projects.map((project) => publicProject(project)),
+    metricon,
+    platrum,
+    bitrix,
+    bitrixUserTasks,
+    calendarSearchTerms,
+    googleWorkspace,
+    dailyAssistant,
+    memory,
+    recentDeviceCommands,
+  };
+}
+
+function resolveActorByTelegramId(state, telegramUserId) {
+  const actor = state.users.find((user) => user.telegram?.telegramUserId === String(telegramUserId));
+  if (!actor) {
+    throw unauthorized("Telegram account is not registered. Use /register CODE.");
+  }
+  return actor;
+}
+
+function resolveActorByUserId(state, userId) {
+  const actor = state.users.find((user) => user.id === String(userId));
+  if (!actor) {
+    throw unauthorized("Local agent is not registered.");
+  }
+  return actor;
+}
+
+function resolveTargetUsers({ state, actor, question, accessibleUsers, visibleDevices }) {
+  const normalizedQuestion = normalizeForSearch(question);
+  const mentioned = accessibleUsers.filter((user) => {
+    const aliases = userAliases(user, visibleDevices);
+    return aliases.some((alias) => normalizedQuestion.includes(alias));
+  });
+  if (mentioned.length) {
+    return mentioned;
+  }
+
+  if (/\b(все|команд|подчин|пм|pm|менеджер|сотрудник)/iu.test(question)) {
+    return accessibleUsers;
+  }
+
+  if (actor.role === "PM") {
+    return [actor];
+  }
+
+  return accessibleUsers.slice(0, Math.min(3, accessibleUsers.length));
+}
+
+function userAliases(user, visibleDevices) {
+  const aliases = [
+    user.id,
+    user.displayName,
+    user.employeeId,
+    String(user.kickidlerEmployeeId || ""),
+    ...(USER_ALIASES[user.id] || []),
+  ];
+  for (const device of visibleDevices) {
+    if (device.userId === user.id) {
+      aliases.push(device.deviceId, device.displayName, device.hostname);
+      if (device.labels?.person) {
+        aliases.push(device.labels.person);
+      }
+    }
+  }
+  return aliases
+    .map(normalizeForSearch)
+    .filter((alias) => alias && alias.length >= 2);
+}
+
+function resolveRelevantProjects({ state, actor, targetUsers, question }) {
+  const normalizedQuestion = normalizeForSearch(question);
+  const targetUserIds = new Set(targetUsers.map((user) => user.id));
+  return state.projects
+    .filter((project) => canAccessProject(state, actor, project))
+    .filter((project) => {
+      const mentioned =
+        normalizedQuestion.includes(normalizeForSearch(project.id)) ||
+        normalizedQuestion.includes(normalizeForSearch(project.name));
+      const related =
+        targetUserIds.has(project.ownerUserId) ||
+        targetUserIds.has(project.managerUserId) ||
+        project.memberUserIds.some((userId) => targetUserIds.has(userId));
+      return mentioned || related || targetUsers.length === 0;
+    })
+    .slice(0, MAX_CONTEXT_PROJECTS);
+}
+
+async function readMetriconContext({ targetUsers, period, kickidlerClient }) {
+  const employeeIds = targetUsers
+    .map((user) => user.kickidlerEmployeeId)
+    .filter((employeeId) => employeeId !== null && employeeId !== undefined);
+
+  if (!employeeIds.length) {
+    return { source: "none", configured: false, employees: [], note: "No Metricon employee ids for target users." };
+  }
+
+  try {
+    const summary = await kickidlerClient.getActivitySummary({
+      employeeIds,
+      from: period.from,
+      to: period.to,
+    });
+    return {
+      source: summary.source,
+      configured: summary.configured,
+      from: summary.from,
+      to: summary.to,
+      employees: targetUsers.map((user) => ({
+        user: publicUser(user),
+        metrics:
+          summary.employees.find((item) => String(item.kickidlerEmployeeId) === String(user.kickidlerEmployeeId)) ||
+          null,
+      })),
+    };
+  } catch (error) {
+    return {
+      source: "metricon",
+      configured: true,
+      error: error instanceof Error ? error.message : String(error),
+      employees: [],
+    };
+  }
+}
+
+async function readPlatrumContext({ projects, targetUsers, period, platrumClient }) {
+  if (!platrumClient) {
+    return {
+      source: "none",
+      configured: false,
+      readOnly: true,
+      userTasks: [],
+      projectTasks: [],
+      note: "Platrum client is not enabled.",
+    };
+  }
+
+  const userTasks = [];
+  for (const user of targetUsers) {
+    try {
+      const result = await platrumClient.getUserTasks({ user, limit: MAX_TASKS_PER_PROJECT, period });
+      const tasks = result.tasks.map((task) => ({ ...task, overdue: Boolean(task.overdue) }));
+      userTasks.push({
+        source: result.source,
+        configured: result.configured,
+        readOnly: true,
+        user: publicUser(user),
+        platrumUserId: result.platrumUserId ?? user.platrumUserId ?? null,
+        platrumUsername: result.platrumUsername ?? user.platrumUsername ?? null,
+        note: result.note ?? null,
+        summary: summarizePlatrumTasks(tasks),
+        tasks: tasks.slice(0, MAX_TASKS_PER_PROJECT),
+      });
+    } catch (error) {
+      userTasks.push({
+        source: "platrum",
+        configured: true,
+        readOnly: true,
+        user: publicUser(user),
+        platrumUserId: user.platrumUserId ?? null,
+        error: error instanceof Error ? error.message : String(error),
+        summary: summarizePlatrumTasks([]),
+        tasks: [],
+      });
+    }
+  }
+
+  const projectTasks = [];
+  for (const project of projects) {
+    try {
+      const [tasksResult, reportResult] = await Promise.all([
+        platrumClient.getProjectTasks({ project, limit: MAX_TASKS_PER_PROJECT }),
+        platrumClient.getProjectReport({ project }),
+      ]);
+      const tasks = tasksResult.tasks.map((task) => ({ ...task, overdue: Boolean(task.overdue) }));
+      projectTasks.push({
+        source: tasksResult.source,
+        configured: tasksResult.configured,
+        readOnly: true,
+        project: publicProject(project),
+        platrumProjectId: tasksResult.platrumProjectId ?? project.platrumProjectId ?? null,
+        note: tasksResult.note ?? reportResult.note ?? null,
+        summary: summarizePlatrumTasks(tasks),
+        projectReport: reportResult.report,
+        tasks: tasks.slice(0, MAX_TASKS_PER_PROJECT),
+      });
+    } catch (error) {
+      projectTasks.push({
+        source: "platrum",
+        configured: true,
+        readOnly: true,
+        project: publicProject(project),
+        platrumProjectId: project.platrumProjectId ?? null,
+        error: error instanceof Error ? error.message : String(error),
+        summary: summarizePlatrumTasks([]),
+        tasks: [],
+      });
+    }
+  }
+
+  let dailyReports = null;
+  let teamMetrics = null;
+  try {
+    dailyReports = await platrumClient.getDailyReports({ limit: 100 });
+  } catch (error) {
+    dailyReports = {
+      source: "platrum",
+      configured: true,
+      error: error instanceof Error ? error.message : String(error),
+      reports: [],
+    };
+  }
+  try {
+    teamMetrics = await platrumClient.getTeamMetrics();
+  } catch (error) {
+    teamMetrics = {
+      source: "platrum",
+      configured: true,
+      error: error instanceof Error ? error.message : String(error),
+      metrics: null,
+    };
+  }
+
+  return {
+    source: "platrum",
+    configured: Boolean(platrumClient.configured),
+    readOnly: true,
+    period,
+    userTasks,
+    projectTasks,
+    dailyReports,
+    teamMetrics,
+  };
+}
+
+async function readBitrixContext({ projects, bitrixClient }) {
+  const reports = [];
+  for (const project of projects) {
+    try {
+      const result = await bitrixClient.getProjectTasks({ project, limit: MAX_TASKS_PER_PROJECT });
+      const tasks = result.tasks.map((task) => ({
+        ...task,
+        overdue: isTaskOverdue(task),
+      }));
+      reports.push({
+        source: result.source,
+        configured: result.configured,
+        project: publicProject(project),
+        summary: summarizeTasks(tasks),
+        tasks: tasks.slice(0, MAX_TASKS_PER_PROJECT),
+      });
+    } catch (error) {
+      reports.push({
+        source: "bitrix",
+        configured: true,
+        project: publicProject(project),
+        error: error instanceof Error ? error.message : String(error),
+        tasks: [],
+      });
+    }
+  }
+  return reports;
+}
+
+async function readBitrixUserTasksContext({ targetUsers, bitrixClient }) {
+  const reports = [];
+  if (!bitrixClient?.getUserTasks) {
+    return reports;
+  }
+
+  for (const user of targetUsers) {
+    try {
+      const result = await bitrixClient.getUserTasks({ user, limit: MAX_TASKS_PER_PROJECT });
+      const tasks = result.tasks.map((task) => ({
+        ...task,
+        overdue: isTaskOverdue(task),
+      }));
+      reports.push({
+        source: result.source,
+        configured: result.configured,
+        user: publicUser(user),
+        bitrixUserId: result.bitrixUserId ?? user.bitrixUserId ?? null,
+        note: result.note ?? null,
+        summary: summarizeTasks(tasks),
+        tasks: tasks.slice(0, MAX_TASKS_PER_PROJECT),
+      });
+    } catch (error) {
+      reports.push({
+        source: "bitrix",
+        configured: true,
+        user: publicUser(user),
+        bitrixUserId: user.bitrixUserId ?? null,
+        error: error instanceof Error ? error.message : String(error),
+        tasks: [],
+      });
+    }
+  }
+  return reports;
+}
+
+function resolveGoogleContextUsers({ targetUsers, accessibleUsers, question }) {
+  const selected = [];
+  const addUser = (user) => {
+    if (user && !selected.some((item) => item.id === user.id)) {
+      selected.push(user);
+    }
+  };
+
+  for (const user of targetUsers) {
+    addUser(user);
+  }
+
+  if (isCalendarQuestion(question)) {
+    for (const user of accessibleUsers) {
+      addUser(user);
+    }
+  }
+
+  return selected.slice(0, MAX_GOOGLE_CONTEXT_USERS);
+}
+
+function isCalendarQuestion(question) {
+  return /\b(calendar|schedule)\b|календар|график|расписани|сводк/u.test(normalizeForSearch(question));
+}
+
+function buildCalendarSearchTerms({ question, targetUsers, visibleDevices }) {
+  const terms = [];
+  const add = (value) => {
+    const normalized = String(value || "").trim();
+    if (normalized && !terms.some((term) => normalizeForSearch(term) === normalizeForSearch(normalized))) {
+      terms.push(normalized);
+    }
+  };
+
+  add(question);
+  for (const phrase of extractCalendarCandidatePhrases(question)) {
+    add(phrase);
+  }
+  for (const user of targetUsers) {
+    for (const alias of userAliases(user, visibleDevices)) {
+      add(alias);
+      add(`${alias} PM`);
+      add(`${alias} ПМ`);
+    }
+  }
+
+  return terms.slice(0, 20);
+}
+
+function extractCalendarCandidatePhrases(question) {
+  const cleaned = String(question || "")
+    .replace(/[?!.,;:]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const phrases = [];
+  const patterns = [
+    /(?:по|для|про|график|календар[ьяе]?|расписани[ея])\s+([a-zа-яё0-9/ _-]{2,60})/giu,
+    /(?:сводк[ауи]\s+по)\s+([a-zа-яё0-9/ _-]{2,60})/giu,
+  ];
+  for (const pattern of patterns) {
+    for (const match of cleaned.matchAll(pattern)) {
+      const phrase = match[1]
+        .replace(/\b(?:с|по|за|на|от|до|и|задай|найди|покажи|июня|июль|июля|май|мая)\b.*$/giu, "")
+        .trim();
+      if (phrase) {
+        phrases.push(phrase);
+      }
+    }
+  }
+  return phrases;
+}
+
+async function readGoogleWorkspaceContext({ users: contextUsers, period, googleOAuthService, calendarSearchTerms }) {
+  if (!googleOAuthService) {
+    return {
+      source: "none",
+      configured: false,
+      users: [],
+      note: "Google OAuth service is not enabled.",
+    };
+  }
+
+  const users = [];
+  for (const user of contextUsers.slice(0, MAX_GOOGLE_CONTEXT_USERS)) {
+    try {
+      const snapshot = await googleOAuthService.readWorkspaceSnapshot({
+        userId: user.id,
+        period,
+        limits: {
+          calendarEvents: 8,
+          calendarList: 100,
+          calendarSearchTerms,
+          sharedCalendarMatches: 8,
+          sharedCalendarEvents: 20,
+          gmailMessages: 5,
+          driveFiles: 8,
+        },
+      });
+      users.push({
+        user: publicUser(user),
+        ...snapshot,
+      });
+    } catch (error) {
+      users.push({
+        user: publicUser(user),
+        source: "google",
+        configured: true,
+        connected: null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    source: "google",
+    configured: true,
+    users,
+  };
+}
+
+function resolveQuestionPeriod(question, now) {
+  const normalized = normalizeForSearch(question);
+  const explicitRange = resolveExplicitDateRange(question, now);
+  if (explicitRange) {
+    return explicitRange;
+  }
+  const to = now;
+  if (normalized.includes("недел") || normalized.includes("week")) {
+    return {
+      label: "last 7 days",
+      from: new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      to: to.toISOString(),
+    };
+  }
+
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  return { label: "today", from: start.toISOString(), to: end.toISOString() };
+}
+
+function resolveExplicitDateRange(question, now) {
+  const text = normalizeForSearch(question);
+  const monthName = Object.keys(RUSSIAN_MONTHS).join("|");
+  const sameMonth = new RegExp(`(?:с\\s*)?(\\d{1,2})\\s*(?:-|по|до)\\s*(\\d{1,2})\\s*(${monthName})`, "iu");
+  const sameMonthMatch = text.match(sameMonth);
+  if (sameMonthMatch) {
+    const month = RUSSIAN_MONTHS[sameMonthMatch[3]];
+    return buildDateRange({
+      fromDay: sameMonthMatch[1],
+      fromMonth: month,
+      toDay: sameMonthMatch[2],
+      toMonth: month,
+      now,
+    });
+  }
+
+  const explicitMonths = new RegExp(`(?:с\\s*)?(\\d{1,2})\\s*(${monthName})\\s*(?:по|до|-)\\s*(\\d{1,2})\\s*(${monthName})`, "iu");
+  const explicitMonthsMatch = text.match(explicitMonths);
+  if (explicitMonthsMatch) {
+    return buildDateRange({
+      fromDay: explicitMonthsMatch[1],
+      fromMonth: RUSSIAN_MONTHS[explicitMonthsMatch[2]],
+      toDay: explicitMonthsMatch[3],
+      toMonth: RUSSIAN_MONTHS[explicitMonthsMatch[4]],
+      now,
+    });
+  }
+
+  const numeric = text.match(/(?:с\s*)?(\d{1,2})[./-](\d{1,2})\s*(?:по|до|-)\s*(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?/iu);
+  if (numeric) {
+    return buildDateRange({
+      fromDay: numeric[1],
+      fromMonth: numeric[2],
+      toDay: numeric[3],
+      toMonth: numeric[4],
+      year: numeric[5],
+      now,
+    });
+  }
+
+  return null;
+}
+
+const RUSSIAN_MONTHS = Object.freeze({
+  январь: 1,
+  января: 1,
+  февраль: 2,
+  февраля: 2,
+  март: 3,
+  марта: 3,
+  апрель: 4,
+  апреля: 4,
+  май: 5,
+  мая: 5,
+  июнь: 6,
+  июня: 6,
+  июль: 7,
+  июля: 7,
+  август: 8,
+  августа: 8,
+  сентябрь: 9,
+  сентября: 9,
+  октябрь: 10,
+  октября: 10,
+  ноябрь: 11,
+  ноября: 11,
+  декабрь: 12,
+  декабря: 12,
+});
+
+function buildDateRange({ fromDay, fromMonth, toDay, toMonth, year, now }) {
+  const normalizedYear = normalizeYear(year, now);
+  const start = buildLocalDate({
+    year: normalizedYear,
+    month: Number(fromMonth),
+    day: Number(fromDay),
+    endOfDay: false,
+  });
+  const end = buildLocalDate({
+    year: normalizedYear,
+    month: Number(toMonth),
+    day: Number(toDay),
+    endOfDay: true,
+  });
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) {
+    return null;
+  }
+  return {
+    label: `${formatLocalDateLabel(normalizedYear, fromMonth, fromDay)}..${formatLocalDateLabel(normalizedYear, toMonth, toDay)}`,
+    from: start.toISOString(),
+    to: end.toISOString(),
+  };
+}
+
+function buildLocalDate({ year, month, day, endOfDay }) {
+  const time = endOfDay ? "23:59:59.999" : "00:00:00.000";
+  return new Date(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${time}+06:00`);
+}
+
+function normalizeYear(value, now) {
+  if (!value) {
+    return now.getFullYear();
+  }
+  const year = Number(value);
+  if (year < 100) {
+    return 2000 + year;
+  }
+  return year;
+}
+
+function formatLocalDateLabel(year, month, day) {
+  return `${year}-${String(Number(month)).padStart(2, "0")}-${String(Number(day)).padStart(2, "0")}`;
+}
+
+function buildSystemPrompt() {
+  return [
+    "Use context.platrum as the primary source for employees, projects, kanban tasks, daily reports, attendance, metrics and efficiency. Bitrix is legacy/fallback only.",
+    "Platrum is read-only. Never claim that you changed, deleted, approved, moved or created a Platrum task.",
+    "Ты корпоративный AI-ассистент Starlab Agent.",
+    "Отвечай на русском языке, кратко, по делу и как рабочий помощник.",
+    "Ты помогаешь владельцу, старшему PM и PM понимать работу команды.",
+    "Используй только предоставленный JSON-контекст. Не выдумывай факты.",
+    "Если данных нет, прямо скажи, каких данных не хватает.",
+    "Всегда учитывай accessPolicy и не раскрывай данные вне доступного scope.",
+    "Если Metricon или Bitrix source=mock/configured=false, предупреди, что это тестовые данные.",
+    "Если Google Workspace connected=false, скажи, что сотрудник еще не подключил Google через /google_connect.",
+    "Если Google Docs/Sheets text или rows truncated/ограничены, честно скажи, что виден только короткий фрагмент.",
+    "Если dailyAssistant содержит план, blockers или metrics, учитывай их как рабочий план дня и текущий прогресс.",
+    "Use context.memory for short-term conversation continuity. If user says 'не открылось', 'то же самое', 'оставшиеся', resolve it from memory and recentDeviceCommands.",
+    "Use context.recentDeviceCommands to understand whether a local desktop action was queued, claimed, succeeded, failed or expired.",
+    "Эффективность по задачам считай как completed / total * 100, если есть задачи.",
+    "Не упоминай системные токены, секреты, внутренние webhook-и или пароли.",
+    "Never claim that you sent, queued, executed or completed a local device command. Real desktop actions are handled by the server before Claude is called.",
+    "Пиши для Telegram: короткий заголовок, затем понятные секции; без Markdown-таблиц, JSON, сырого debug-контекста и непонятных символов.",
+    "Каждый ответ должен быть полезным руководителю или сотруднику: сначала вывод, затем факты, затем что проверить дальше.",
+    "When Bitrix project tasks are empty, also check bitrixUserTasks. User-assigned tasks can be personal or in a different workgroup.",
+    "For task and project questions, prefer platrum.userTasks and platrum.projectTasks over Bitrix.",
+    "For employee work schedules and calendar summaries, first check googleWorkspace.users[].sharedCalendars. These are Google 'Other calendars' from connected PM accounts.",
+  ].join(" ");
+}
+
+function buildUserPrompt({ question, context }) {
+  return [
+    "Primary work system: Platrum. Use Platrum for tasks, projects, daily reports and efficiency before any Bitrix legacy data.",
+    "For questions about a specific employee, use platrum.userTasks first, then platrum.projectTasks and platrum.dailyReports.",
+    `Вопрос пользователя: ${question}`,
+    "",
+    "Контекст:",
+    JSON.stringify(context, null, 2),
+    "",
+    "Сформируй ответ. Если вопрос про работу сотрудника, дай:",
+    "1. сколько работал/активничал по Metricon, если данные есть;",
+    "2. сколько задач всего/открыто/завершено/просрочено по Bitrix, если данные есть;",
+    "3. что видно по Calendar/Gmail/Drive/Docs/Sheets, если Google подключен;",
+    "4. что видно по dailyAssistant: план дня, blockers, текущие metrics;",
+    "5. примерный процент эффективности, если его можно честно посчитать;",
+    "6. что нужно проверить дальше.",
+    "Оформи ответ как Telegram-сообщение: заголовок, блок 'Коротко', блок 'Детали', блок 'Следующие шаги' при необходимости.",
+    "Не используй таблицы Markdown, не вставляй JSON и не показывай технический context целиком.",
+    "For questions about a specific employee, use bitrixUserTasks first and project Bitrix data second.",
+    "For calendar/schedule questions, use sharedCalendars matches before primary calendar events.",
+  ].join("\n");
+}
+
+function describeAccessPolicy(role) {
+  if (role === "OWNER") {
+    return "OWNER can access all users, projects, and device agents.";
+  }
+  if (role === "SENIOR_PM") {
+    return "SENIOR_PM can access self and subordinate PM users/projects/devices.";
+  }
+  return "PM can access only own user/project/device scope.";
+}
+
+function normalizeForSearch(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/ё/gu, "е")
+    .trim();
+}
+
+function isTaskOverdue(task) {
+  if (!task.deadline || task.statusLabel === "completed") {
+    return false;
+  }
+  const deadline = new Date(task.deadline).getTime();
+  return Number.isFinite(deadline) && deadline < Date.now();
+}
+
+function recordAssistantPlatrumSnapshots(state, { context, now = new Date() }) {
+  if (!context?.platrum) {
+    return;
+  }
+  ensurePlatrumAnalyticsState(state);
+  const date = getLocalDateKey(now);
+  const reports = context.platrum.dailyReports?.reports || [];
+  const teamMetrics = context.platrum.teamMetrics?.metrics || null;
+
+  for (const item of context.platrum.userTasks || []) {
+    const tasks = item.tasks || [];
+    const userReports = reports.filter((report) => {
+      if (item.platrumUserId && String(report.userId) === String(item.platrumUserId)) {
+        return true;
+      }
+      if (item.platrumUsername && String(report.username || "").toLowerCase() === String(item.platrumUsername).toLowerCase()) {
+        return true;
+      }
+      return false;
+    });
+    const analytics = buildEmployeeKpi({
+      user: {
+        ...item.user,
+        platrumUserId: item.platrumUserId,
+      },
+      tasks,
+      dailyReports: userReports,
+      metrics: teamMetrics,
+      date,
+    });
+    upsertById(state.employeeKpiDaily, {
+      id: `assistant-platrum-employee-${item.user.id}-${date}`,
+      kind: "employee",
+      userId: item.user.id,
+      platrumUserId: item.platrumUserId ?? null,
+      date,
+      source: "platrum",
+      taskSummary: analytics.taskSummary,
+      reportsSubmitted: analytics.reportsSubmitted,
+      lateReports: analytics.lateReports,
+      efficiencyPercent: analytics.efficiencyPercent,
+      confidence: analytics.confidence,
+      updatedAt: now.toISOString(),
+    });
+  }
+
+  for (const item of context.platrum.projectTasks || []) {
+    upsertById(state.projectKpiDaily, {
+      id: `assistant-platrum-project-${item.project.id}-${date}`,
+      kind: "project",
+      projectId: item.project.id,
+      platrumProjectId: item.platrumProjectId ?? null,
+      date,
+      source: "platrum",
+      taskSummary: item.summary,
+      projectReport: item.projectReport || null,
+      efficiencyPercent: item.summary?.efficiencyPercent ?? null,
+      updatedAt: now.toISOString(),
+    });
+  }
+}
+
+function upsertById(list, value) {
+  const index = list.findIndex((item) => item.id === value.id);
+  if (index === -1) {
+    list.push(value);
+  } else {
+    list[index] = { ...list[index], ...value };
+  }
+}
+
+function getLocalDateKey(now = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bishkek",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}

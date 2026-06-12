@@ -74,8 +74,9 @@ http://127.0.0.1:3099/setup
 - Telegram bot token: paste from the secure chat, do not save in git.
 - Telegram report recipient: `984834133`.
 - Nikolay owner Telegram ID: use Nikolay's numeric Telegram id.
-- Metricon API base URL: `http://85.239.49.208:8080`.
-- Metricon token: fill when available.
+- Metricon API base URL: `http://metriconapp.com`.
+- Metricon token: fill access token if available, and refresh token if
+  available. Refresh token is preferred for stable production use.
 - Bitrix webhook: fill later.
 - Google OAuth JSON: upload client JSON.
 - Claude API key: paste and let setup store it encrypted.
@@ -102,6 +103,42 @@ Do not install always-on API/bot tasks on Maksat or PM devices by default.
 - Maksat can see own data plus subordinate PM data.
 - Maksat cannot manage Nikolay or OWNER-only settings.
 - PM can see only own user/project scope.
+
+For macOS client heartbeat, install the lightweight device agent instead of the
+full API/bot server:
+
+```bash
+cd ~/agent/openclawagent/control-plane
+bash scripts/macos/install-device-agent.sh \
+  --user-id u-maksat \
+  --device-id maksat-mac-mini \
+  --display-name "Maksat Mac Mini" \
+  --token "<device-agent-token>" \
+  --run-as-daemon \
+  --start-now
+```
+
+Use `--run-as-daemon` on production macOS clients. It installs
+`/Library/LaunchDaemons/com.company.control-plane.device-agent.plist`, starts
+from the system launchd domain, and replaces the older per-user LaunchAgent.
+
+For Windows client heartbeat:
+
+```powershell
+cd $env:USERPROFILE\agent\openclawagent\control-plane
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\install-device-agent-windows.ps1 `
+  -UserId u-nikolay `
+  -DeviceId nikolay-windows `
+  -DisplayName "Nikolay Windows" `
+  -Token "<device-agent-token>" `
+  -RunAsSystem `
+  -StartNow
+```
+
+Run PowerShell as Administrator on production Windows clients. The
+`-RunAsSystem` flag installs the lightweight device agent into
+`C:\ProgramData\CompanyControlPlaneAgent` and registers
+`CompanyControlPlaneDeviceAgent` as a `SYSTEM` startup task.
 
 Clone `control-plane` or `openclaw` on client devices only for
 development/testing or if a future local bridge is required.

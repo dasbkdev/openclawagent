@@ -86,6 +86,9 @@ export function publicUser(user) {
     managerId: user.managerId,
     employeeId: user.employeeId,
     kickidlerEmployeeId: user.kickidlerEmployeeId,
+    bitrixUserId: user.bitrixUserId ?? null,
+    platrumUserId: user.platrumUserId ?? null,
+    platrumUsername: user.platrumUsername ?? null,
     telegramLinked: Boolean(user.telegram?.telegramUserId),
   };
 }
@@ -95,6 +98,7 @@ export function publicProject(project) {
     id: project.id,
     name: project.name,
     bitrixGroupId: project.bitrixGroupId ?? null,
+    platrumProjectId: project.platrumProjectId ?? null,
     ownerUserId: project.ownerUserId,
     managerUserId: project.managerUserId,
     memberUserIds: project.memberUserIds,

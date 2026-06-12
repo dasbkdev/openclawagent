@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Starlab OpenClaw Agent</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">OC</div>
+      <div>
+        <div class="brand-title">OpenClaw Agent</div>
+        <div class="brand-subtitle">Starlab Desktop</div>
+      </div>
+    </div>
+
+    <section class="status-card">
+      <div class="status-row">
+        <span id="statusDot" class="dot"></span>
+        <span id="statusText">Проверка...</span>
+      </div>
+      <dl>
+        <div>
+          <dt>Пользователь</dt>
+          <dd id="userText">-</dd>
+        </div>
+        <div>
+          <dt>Роль</dt>
+          <dd id="roleText">-</dd>
+        </div>
+        <div>
+          <dt>Устройство</dt>
+          <dd id="deviceText">-</dd>
+        </div>
+        <div>
+          <dt>Token storage</dt>
+          <dd id="tokenStorageText">-</dd>
+        </div>
+        <div>
+          <dt>Heartbeat</dt>
+          <dd id="heartbeatText">-</dd>
+        </div>
+      </dl>
+      <button id="heartbeatButton" class="ghost-button" type="button">Обновить статус</button>
+      <button id="updateButton" class="ghost-button hidden" type="button">Установить обновление</button>
+      <div id="updateText" class="message"></div>
+    </section>
+
+    <button id="resetButton" class="danger-button" type="button">Сбросить активацию</button>
+  </aside>
+
+  <main class="main">
+    <section id="activationPanel" class="panel">
+      <div class="panel-header">
+        <p class="eyebrow">Первый запуск</p>
+        <h1>Введите registration code</h1>
+        <p>Код выдаёт Николай. После активации приложение привяжет этот компьютер к сотруднику, роли и общей памяти серверного агента.</p>
+      </div>
+
+      <form id="activationForm" class="activation-form">
+        <label for="serverUrl">Сервер</label>
+        <input id="serverUrl" name="serverUrl" autocomplete="off" value="https://starlabagent.pp.ua">
+
+        <label for="registrationCode">Registration code</label>
+        <input id="registrationCode" name="registrationCode" autocomplete="one-time-code" placeholder="Например: WIOD23WED" required>
+
+        <button id="activateButton" class="primary-button" type="submit">Активировать агент</button>
+      </form>
+      <div id="activationMessage" class="message"></div>
+    </section>
+
+    <section id="chatPanel" class="panel chat-panel hidden">
+      <div class="panel-header compact">
+        <p class="eyebrow">Рабочий ассистент</p>
+        <h1>Спросите агента</h1>
+        <p>Он использует тот же серверный контекст, что Telegram-бот: Bitrix, Google, устройства, роли, отчёты и общую память.</p>
+      </div>
+
+      <div id="messages" class="messages"></div>
+
+      <form id="chatForm" class="chat-form">
+        <textarea id="question" rows="3" placeholder="Например: дай сводку по Максату за неделю по календарю и Bitrix"></textarea>
+        <button id="askButton" class="primary-button" type="submit">Отправить</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="./renderer.js"></script>
+</body>
+</html>

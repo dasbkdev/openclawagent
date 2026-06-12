@@ -1,5 +1,35 @@
 import { validation } from "../domain/errors.js";
 
+export const READ_ONLY_BITRIX_METHODS = Object.freeze([
+  "profile",
+  "scope",
+  "tasks.task.get",
+  "tasks.task.getfields",
+  "tasks.task.list",
+  "task.item.getdata",
+  "task.item.list",
+  "sonet_group.get",
+  "socialnetwork.api.workgroup.get",
+  "socialnetwork.api.workgroup.list",
+  "user.get",
+  "user.search",
+  "crm.category.list",
+  "crm.deal.get",
+  "crm.deal.list",
+  "crm.dealcategory.list",
+  "crm.dealcategory.stage.list",
+  "crm.item.get",
+  "crm.item.list",
+  "crm.lead.get",
+  "crm.lead.list",
+  "crm.stage.list",
+  "crm.status.list",
+  "crm.type.get",
+  "crm.type.list",
+]);
+
+const READ_ONLY_BITRIX_METHOD_SET = new Set(READ_ONLY_BITRIX_METHODS);
+
 export function createBitrixClientFromEnv(env = process.env) {
   if (env.BITRIX_WEBHOOK_URL) {
     return new HttpBitrixClient({
@@ -8,6 +38,17 @@ export function createBitrixClientFromEnv(env = process.env) {
     });
   }
   return new MockBitrixClient();
+}
+
+export function assertReadOnlyBitrixMethod(method) {
+  const normalized = normalizeBitrixMethodName(method);
+  if (!READ_ONLY_BITRIX_METHOD_SET.has(normalized)) {
+    throw validation("Bitrix REST method is blocked by read-only guard", {
+      method: normalized || String(method ?? ""),
+      allowedMethods: READ_ONLY_BITRIX_METHODS,
+    });
+  }
+  return normalized;
 }
 
 export class MockBitrixClient {
@@ -22,6 +63,16 @@ export class MockBitrixClient {
       configured: this.configured,
       projectId: project.id,
       tasks: buildMockTasks(project, limit),
+    };
+  }
+
+  async getUserTasks({ user, limit = 20 }) {
+    return {
+      source: this.source,
+      configured: this.configured,
+      userId: user.id,
+      bitrixUserId: user.bitrixUserId ?? null,
+      tasks: buildMockTasks({ id: `user-${user.id}`, ownerUserId: user.id }, limit),
     };
   }
 }
@@ -45,10 +96,13 @@ export class HttpBitrixClient {
       select: [
         "ID",
         "TITLE",
+        "GROUP_ID",
+        "STAGE_ID",
         "STATUS",
         "DEADLINE",
         "RESPONSIBLE_ID",
         "RESPONSIBLE_NAME",
+        "CREATED_BY",
         "CHANGED_DATE",
         "CLOSED_DATE",
       ],
@@ -63,7 +117,53 @@ export class HttpBitrixClient {
     };
   }
 
+  async getUserTasks({ user, limit = 20, includeClosed = true }) {
+    if (!user.bitrixUserId) {
+      return {
+        source: this.source,
+        configured: this.configured,
+        userId: user.id,
+        bitrixUserId: null,
+        note: "User has no Bitrix user mapping",
+        tasks: [],
+      };
+    }
+
+    const filter = { RESPONSIBLE_ID: user.bitrixUserId };
+    if (!includeClosed) {
+      filter["!STATUS"] = 5;
+    }
+
+    const payload = await this.callMethod("tasks.task.list", {
+      order: { DEADLINE: "asc", CHANGED_DATE: "desc", ID: "desc" },
+      filter,
+      select: [
+        "ID",
+        "TITLE",
+        "GROUP_ID",
+        "STAGE_ID",
+        "STATUS",
+        "DEADLINE",
+        "RESPONSIBLE_ID",
+        "RESPONSIBLE_NAME",
+        "CREATED_BY",
+        "CHANGED_DATE",
+        "CLOSED_DATE",
+      ],
+      start: 0,
+    });
+
+    return {
+      source: this.source,
+      configured: this.configured,
+      userId: user.id,
+      bitrixUserId: user.bitrixUserId,
+      tasks: readTasks(payload).slice(0, limit).map(normalizeBitrixTask),
+    };
+  }
+
   async callMethod(method, params) {
+    assertReadOnlyBitrixMethod(method);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
@@ -94,16 +194,25 @@ export class HttpBitrixClient {
   }
 }
 
+function normalizeBitrixMethodName(method) {
+  return String(method ?? "")
+    .trim()
+    .toLowerCase();
+}
+
 export function normalizeBitrixTask(task) {
   const status = normalizeStatus(task.status ?? task.STATUS ?? task.realStatus ?? task.REAL_STATUS);
   return {
     id: String(task.id ?? task.ID ?? ""),
     title: String(task.title ?? task.TITLE ?? "Untitled task"),
+    groupId: normalizeNullableString(task.groupId ?? task.GROUP_ID),
+    stageId: normalizeNullableString(task.stageId ?? task.STAGE_ID),
     status,
     statusLabel: statusLabel(status),
     deadline: normalizeNullableString(task.deadline ?? task.DEADLINE),
     responsibleId: normalizeNullableString(task.responsibleId ?? task.RESPONSIBLE_ID),
     responsibleName: normalizeNullableString(task.responsibleName ?? task.RESPONSIBLE_NAME),
+    createdBy: normalizeNullableString(task.createdBy ?? task.CREATED_BY),
     changedAt: normalizeNullableString(task.changedDate ?? task.CHANGED_DATE),
     closedAt: normalizeNullableString(task.closedDate ?? task.CLOSED_DATE),
     url: normalizeNullableString(task.url ?? task.URL),

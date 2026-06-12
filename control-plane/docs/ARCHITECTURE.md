@@ -38,11 +38,18 @@ Maksat and PM devices should be treated as clients by default. They connect to
 the central server through Telegram, central web UI, or a future local OpenClaw
 bridge. The central server applies RBAC for every request.
 
+The MVP client-side runtime is a lightweight device agent. It sends periodic
+heartbeats to `POST /api/v1/device-agents/heartbeat`; the central server stores
+`lastSeenAt`, hostname, platform, and owner user id. Owners can list all visible
+device agents, senior PMs can list themselves and subordinate PM devices, and PMs
+can list only their own devices.
+
 ## MVP Data Model
 
 - `users`: seeded Nikolay, Maksat, and three PMs.
 - `projects`: one project per PM for the first slice.
 - `inviteCodes`: SHA-256 hashes of one-time registration codes.
+- `deviceAgents`: last seen client devices reporting heartbeat.
 - `auditLog`: append-only JSON events in MVP storage.
 - `projects.bitrixGroupId`: Bitrix workgroup/project mapping for task scoping.
 
@@ -61,7 +68,7 @@ stored in `secrets.json` encrypted with AES-256-GCM and a local key file
 Wizard-managed secrets:
 
 - Telegram bot token.
-- Metricon access token.
+- Metricon access token and optional refresh token.
 - Bitrix incoming webhook URL.
 - Claude API key.
 - Google OAuth client JSON.
@@ -124,8 +131,8 @@ high-level reports, not raw unrestricted data.
 Current connectors:
 
 - Metricon activity summary: mock by default, HTTP mode via `METRICON_BASE_URL`
-  and `METRICON_ACCESS_TOKEN`. Legacy `KICKIDLER_*` env names are still
-  accepted for compatibility.
+  plus `METRICON_ACCESS_TOKEN` or `METRICON_REFRESH_TOKEN`. Legacy
+  `KICKIDLER_*` env names are still accepted for compatibility.
 - Bitrix project status: mock by default, webhook mode via `BITRIX_WEBHOOK_URL`
   and `tasks.task.list`.
 

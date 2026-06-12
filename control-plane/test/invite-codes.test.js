@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createInviteCode, redeemInviteCode } from "../src/domain/invite-codes.js";
+import { createInviteCode, redeemInviteCode, reissueInviteCode } from "../src/domain/invite-codes.js";
 import { getUserById } from "../src/domain/policy.js";
 import { createInitialState } from "../src/infra/seed.js";
 
@@ -45,4 +45,25 @@ test("invite code cannot be duplicated", () => {
     () => createInviteCode(state, { issuer: owner, userId: "u-pm-2", code: "SAME2222" }),
     /already exists/,
   );
+});
+
+test("reissue invite code revokes existing active codes for the same user", () => {
+  const state = createInitialState();
+  const owner = getUserById(state, "u-nikolay");
+  const old = createInviteCode(state, { issuer: owner, userId: "u-maksat", code: "OLDM1234" });
+  const otherUserCode = createInviteCode(state, { issuer: owner, userId: "u-pm-1", code: "PM111111" });
+
+  const reissued = reissueInviteCode(state, {
+    issuer: owner,
+    userId: "u-maksat",
+    code: "NEWM1234",
+    now: new Date("2026-06-10T08:00:00.000Z"),
+  });
+
+  assert.equal(reissued.code, "NEWM1234");
+  assert.equal(reissued.revokedCount, 1);
+  assert.equal(old.invite.revokedAt, "2026-06-10T08:00:00.000Z");
+  assert.equal(old.invite.revokedReason, "reissued");
+  assert.equal(reissued.invite.revokedAt, null);
+  assert.equal(otherUserCode.invite.revokedAt, null);
 });

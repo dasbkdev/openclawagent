@@ -30,7 +30,7 @@ test("token usage reporter sends due daily report only to configured Telegram id
   assert.deepEqual(sent, [{ key: "daily", recipientTelegramId: "984834133" }]);
   assert.equal(telegram.messages.length, 1);
   assert.equal(telegram.messages[0].chatId, "984834133");
-  assert.match(telegram.messages[0].text, /Token usage report/);
+  assert.match(telegram.messages[0].text, /Расход токенов/);
   assert.match(telegram.messages[0].text, /coding/);
   assert.equal(state.tokenReportSchedule.daily.lastSentAt, now.toISOString());
 });

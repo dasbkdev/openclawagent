@@ -89,7 +89,7 @@ export function resolveTokenUsagePeriod(period = "day", now = new Date()) {
   if (["day", "daily", "24h", "last24h"].includes(normalized)) {
     return {
       key: "daily",
-      label: "last 24 hours",
+      label: "последние 24 часа",
       from: new Date(to.getTime() - DAY_MS).toISOString(),
       to: to.toISOString(),
       intervalMs: DAY_MS,
@@ -98,7 +98,7 @@ export function resolveTokenUsagePeriod(period = "day", now = new Date()) {
   if (["week", "weekly", "7d"].includes(normalized)) {
     return {
       key: "weekly",
-      label: "last 7 days",
+      label: "последние 7 дней",
       from: new Date(to.getTime() - 7 * DAY_MS).toISOString(),
       to: to.toISOString(),
       intervalMs: 7 * DAY_MS,
@@ -107,7 +107,7 @@ export function resolveTokenUsagePeriod(period = "day", now = new Date()) {
   if (["month", "monthly", "30d"].includes(normalized)) {
     return {
       key: "monthly",
-      label: "last 30 days",
+      label: "последние 30 дней",
       from: new Date(to.getTime() - 30 * DAY_MS).toISOString(),
       to: to.toISOString(),
       intervalMs: 30 * DAY_MS,
@@ -128,39 +128,43 @@ export function isTokenUsageReportDue(scheduleEntry, period, now = new Date(), s
 
 export function formatTokenUsageSummary(summary, { label = "period" } = {}) {
   const lines = [
-    `Token usage report (${label})`,
-    `Events: ${summary.eventCount}`,
-    `Total tokens: ${formatNumber(summary.totals.totalTokens)}`,
-    `Input: ${formatNumber(summary.totals.inputTokens)}, output: ${formatNumber(summary.totals.outputTokens)}`,
-    `Cache read: ${formatNumber(summary.totals.cacheReadTokens)}, cache write: ${formatNumber(summary.totals.cacheWriteTokens)}`,
+    title(`Расход токенов: ${label}`),
+    kv("Запросов", summary.eventCount),
+    kv("Всего токенов", formatNumber(summary.totals.totalTokens)),
+    kv("Вход / ответ", `${formatNumber(summary.totals.inputTokens)} / ${formatNumber(summary.totals.outputTokens)}`),
+    kv("Кеш чтение / запись", `${formatNumber(summary.totals.cacheReadTokens)} / ${formatNumber(summary.totals.cacheWriteTokens)}`),
   ];
 
   if (summary.totals.costUsd > 0) {
-    lines.push(`Estimated cost: $${summary.totals.costUsd.toFixed(4)}`);
+    lines.push(kv("Примерная стоимость", `$${summary.totals.costUsd.toFixed(4)}`));
   }
 
-  lines.push("", "Top users:");
+  lines.push("", subtitle("По пользователям"));
   for (const row of summary.byUser.slice(0, 8)) {
-    lines.push(`- ${row.displayName}: ${formatNumber(row.totalTokens)} tokens (${row.eventCount} events)`);
+    lines.push(
+      `${escapeHtml(row.displayName)}: ${formatTokenCount(row.totalTokens)}, ${formatRequestCount(row.eventCount)}`,
+    );
   }
   if (!summary.byUser.length) {
-    lines.push("- no usage");
+    lines.push("Данных за период нет.");
   }
 
-  lines.push("", "Top actions:");
+  lines.push("", subtitle("По действиям"));
   for (const row of summary.byAction.slice(0, 8)) {
-    lines.push(`- ${row.action}: ${formatNumber(row.totalTokens)} tokens (${row.eventCount} events)`);
+    lines.push(
+      `${escapeHtml(row.action)}: ${formatTokenCount(row.totalTokens)}, ${formatRequestCount(row.eventCount)}`,
+    );
   }
   if (!summary.byAction.length) {
-    lines.push("- no usage");
+    lines.push("Данных за период нет.");
   }
 
-  lines.push("", "Top models:");
+  lines.push("", subtitle("По моделям"));
   for (const row of summary.byModel.slice(0, 6)) {
-    lines.push(`- ${row.model}: ${formatNumber(row.totalTokens)} tokens`);
+    lines.push(`${escapeHtml(row.model)}: ${formatTokenCount(row.totalTokens)}`);
   }
   if (!summary.byModel.length) {
-    lines.push("- no usage");
+    lines.push("Данных за период нет.");
   }
 
   return lines.join("\n");
@@ -341,4 +345,46 @@ function findProject(state, projectId) {
 
 function formatNumber(value) {
   return Math.round(Number(value || 0)).toLocaleString("en-US");
+}
+
+function formatTokenCount(value) {
+  const count = Math.round(Number(value || 0));
+  return `${formatNumber(count)} ${pluralRu(count, "токен", "токена", "токенов")}`;
+}
+
+function formatRequestCount(value) {
+  const count = Math.round(Number(value || 0));
+  return `${formatNumber(count)} ${pluralRu(count, "запрос", "запроса", "запросов")}`;
+}
+
+function pluralRu(value, one, few, many) {
+  const absolute = Math.abs(Number(value || 0));
+  const mod10 = absolute % 10;
+  const mod100 = absolute % 100;
+  if (mod10 === 1 && mod100 !== 11) {
+    return one;
+  }
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return few;
+  }
+  return many;
+}
+
+function title(value) {
+  return `<b>${escapeHtml(value)}</b>`;
+}
+
+function subtitle(value) {
+  return `<b>${escapeHtml(value)}</b>`;
+}
+
+function kv(label, value) {
+  return `<b>${escapeHtml(label)}:</b> ${escapeHtml(value ?? "n/a")}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }

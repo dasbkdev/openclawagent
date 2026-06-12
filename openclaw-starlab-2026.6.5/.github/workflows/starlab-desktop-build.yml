@@ -1,0 +1,74 @@
+name: Starlab OpenClaw Desktop Builds
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - server
+      - develop
+      - main
+    paths:
+      - "apps/macos/**"
+      - "apps/windows/**"
+      - "scripts/package-starlab-mac-dist.sh"
+      - "scripts/package-mac-app.sh"
+      - "scripts/package-mac-dist.sh"
+      - "package.json"
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Build Windows app
+        shell: powershell
+        run: |
+          cd apps/windows
+          npm install
+          npm run build:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starlab-openclaw-agent-windows
+          path: apps/windows/dist/starlab-openclaw-agent-windows.exe
+
+  macos:
+    name: macOS DMG
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "11.2.2"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build macOS app and DMG
+        run: SKIP_NOTARIZE=1 ALLOW_ADHOC_SIGNING=1 pnpm starlab:mac:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starlab-openclaw-agent-macos
+          path: dist/starlab-openclaw-agent-macos-universal.dmg
+
+  linux:
+    name: Linux Debian package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Build Linux app
+        run: |
+          cd apps/windows
+          npm install
+          npm run build:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starlab-openclaw-agent-linux
+          path: apps/windows/dist/starlab-openclaw-agent-linux-amd64.deb

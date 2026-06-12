@@ -42,8 +42,9 @@ test("token usage records and summarizes by user, action, and model", () => {
   assert.equal(summary.byModel[0].model, "anthropic/claude-sonnet-4-6");
 
   const text = formatTokenUsageSummary(summary, { label: "test" });
-  assert.match(text, /Top users/);
-  assert.match(text, /Project_summary|project_summary/);
+  assert.match(text, /Расход токенов/);
+  assert.match(text, /По пользователям/);
+  assert.match(text, /project_summary/);
 });
 
 test("token usage period resolver supports day week and month", () => {

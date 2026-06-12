@@ -1,0 +1,241 @@
+{
+  "id": "starlabDailyAssistant01",
+  "name": "Starlab - Daily Assistant Schedule",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "daily-schedule-trigger",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/automation/daily-assistant/run' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Automation-Token",
+              "value": "={{ $env.AUTOMATION_API_TOKEN || $env.TOKEN_USAGE_INGEST_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "{}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "run-daily-assistant",
+      "name": "Resolve Platrum + Google Schedule",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "messages-sent",
+              "leftValue": "={{ Number($json.data?.sent || 0) }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "messages-sent-if",
+      "name": "Messages Sent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "status",
+              "name": "status",
+              "value": "sent",
+              "type": "string"
+            },
+            {
+              "id": "sent-count",
+              "name": "sent",
+              "value": "={{ Number($json.data?.sent || 0) }}",
+              "type": "number"
+            },
+            {
+              "id": "completed-at",
+              "name": "completedAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "record-sent-result",
+      "name": "Record Sent Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        840,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "status",
+              "name": "status",
+              "value": "nothing_due",
+              "type": "string"
+            },
+            {
+              "id": "completed-at",
+              "name": "completedAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "record-idle-result",
+      "name": "Nothing Due",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        840,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Daily Assistant\nPlatrum is the primary schedule source. Google Calendar is the fallback. Morning prompt: start + 10 minutes. Evening prompt: end - 20 minutes. Sunday is always off. Missing data alerts Telegram 984834133 once per user/day.",
+        "height": 220,
+        "width": 560,
+        "color": 5
+      },
+      "id": "workflow-note",
+      "name": "How Scheduling Works",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        -300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## YouGile\nConnector code is present but YOUGILE_ENABLED=false. It will complement Platrum after API key and board/column/user mapping are approved. Writes require confirmation; delete is blocked.",
+        "height": 200,
+        "width": 460,
+        "color": 3
+      },
+      "id": "yougile-note",
+      "name": "YouGile Disabled",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        620,
+        -330
+      ]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Resolve Platrum + Google Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Platrum + Google Schedule": {
+      "main": [
+        [
+          {
+            "node": "Messages Sent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Messages Sent?": {
+      "main": [
+        [
+          {
+            "node": "Record Sent Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Nothing Due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Bishkek",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "none"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

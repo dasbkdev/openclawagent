@@ -1,0 +1,57 @@
+{
+  "name": "starlab-openclaw-desktop-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native desktop shell for Starlab OpenClaw employee agent.",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win portable --x64",
+    "build:mac": "electron-builder --mac dmg --x64 --arm64",
+    "build:linux": "electron-builder --linux deb --x64"
+  },
+  "build": {
+    "appId": "com.starlab.openclaw.agent",
+    "productName": "Starlab OpenClaw Agent",
+    "copyright": "Copyright (c) 2026 Starlab",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "forceCodeSigning": false
+    },
+    "portable": {
+      "artifactName": "starlab-openclaw-agent-windows.exe"
+    },
+    "dmg": {
+      "artifactName": "starlab-openclaw-agent-macos-${arch}.dmg"
+    },
+    "deb": {
+      "artifactName": "starlab-openclaw-agent-linux-amd64.deb",
+      "category": "Office"
+    },
+    "mac": {
+      "category": "public.app-category.business",
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "maintainer": "Starlab",
+      "category": "Office"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  }
+}

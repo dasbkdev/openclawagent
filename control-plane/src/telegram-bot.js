@@ -1,14 +1,20 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createClaudeClientFromEnv } from "./assistant/claude-client.js";
 import { createBitrixClientFromEnv } from "./connectors/bitrix-client.js";
 import { createKickidlerClientFromEnv } from "./connectors/kickidler-client.js";
+import { createPlatrumClientFromEnv } from "./connectors/platrum-client.js";
+import { createGoogleOAuthService } from "./integrations/google-oauth.js";
 import { loadEnvFile } from "./infra/env.js";
 import { createInitialState } from "./infra/seed.js";
 import { JsonStore, resolveDefaultDataFile } from "./infra/json-store.js";
 import { createSetupService } from "./setup/setup-service.js";
+import { TELEGRAM_BOT_COMMANDS } from "./telegram/bot-commands.js";
+import { sendDueDailyAssistantMessages } from "./telegram/daily-assistant-reporter.js";
 import { handleTelegramMessage } from "./telegram/handler.js";
 import { TelegramBotApi } from "./telegram/telegram-api.js";
 import { sendDueTokenUsageReports } from "./telegram/token-usage-reporter.js";
+import { createVoiceServiceFromEnv } from "./integrations/voice-service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -17,9 +23,19 @@ const setupService = createSetupService({ projectRoot });
 await setupService.applyToEnv();
 
 const store = new JsonStore(resolveDefaultDataFile(projectRoot), () => createInitialState());
+const googleOAuthService = createGoogleOAuthService({ setupService });
+const createMetriconClient = async () => {
+  await setupService.applyToEnv(process.env, { overwrite: true });
+  return createKickidlerClientFromEnv(process.env, {
+    onTokenRefresh: async ({ accessToken, refreshToken }) => {
+      await setupService.saveMetriconTokens({ accessToken, refreshToken });
+    },
+  });
+};
 
 let offset = Number(process.env.TELEGRAM_UPDATE_OFFSET || 0) || undefined;
 let nextMissingTokenLogAt = 0;
+let commandsSyncedForToken = null;
 
 console.log("telegram bot polling started");
 
@@ -36,11 +52,25 @@ while (true) {
       continue;
     }
 
-    const telegram = new TelegramBotApi({ token: process.env.TELEGRAM_BOT_TOKEN });
+    const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
+    const telegram = new TelegramBotApi({ token: telegramToken });
+    if (commandsSyncedForToken !== telegramToken) {
+      await telegram.setMyCommands({ commands: TELEGRAM_BOT_COMMANDS });
+      commandsSyncedForToken = telegramToken;
+      console.log(`telegram command menu synchronized (${TELEGRAM_BOT_COMMANDS.length} commands)`);
+    }
     await sendDueTokenUsageReports({
       store,
       telegram,
       recipientTelegramId: process.env.TOKEN_USAGE_REPORT_TELEGRAM_ID || "984834133",
+    });
+    await sendDueDailyAssistantMessages({
+      store,
+      telegram,
+      kickidlerClient: await createMetriconClient(),
+      bitrixClient: createBitrixClientFromEnv(),
+      platrumClient: createPlatrumClientFromEnv(),
+      googleOAuthService,
     });
     const updates = await telegram.getUpdates({ offset, timeout: 25 });
     for (const update of updates) {
@@ -49,8 +79,12 @@ while (true) {
         await handleTelegramMessage({
           store,
           telegram,
-          kickidlerClient: createKickidlerClientFromEnv(),
+          kickidlerClient: await createMetriconClient(),
           bitrixClient: createBitrixClientFromEnv(),
+          platrumClient: createPlatrumClientFromEnv(),
+          claudeClient: createClaudeClientFromEnv(),
+          googleOAuthService,
+          voiceService: createVoiceServiceFromEnv(),
           message: update.message,
         });
       }

@@ -88,7 +88,8 @@ Fill:
 - Telegram bot token.
 - Claude API key.
 - Metricon base URL.
-- Metricon access token.
+- Metricon access token or refresh token. Refresh token is preferred because
+  Metricon access tokens are short lived.
 - Bitrix webhook/API credentials.
 - Google OAuth client JSON.
 - Token usage report recipient: `984834133`.

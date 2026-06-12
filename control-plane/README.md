@@ -22,6 +22,11 @@ contracts outside Metricon and OpenClaw.
 - Records token usage events and summarizes spend by user, action, model, and
   project.
 - Sends automatic token usage reports to Telegram id `984834133`.
+- Lets Telegram users ask free-form Russian questions; the bot sends allowed
+  Metricon, Bitrix, device, Calendar, Gmail, Drive, Docs, and Sheets context to
+  Claude.
+- Supports per-user Google OAuth connect/status/disconnect with encrypted
+  refresh tokens and read-only Calendar/Gmail/Drive/Docs/Sheets snapshots.
 - Uses a JSON file store for MVP speed and easy review.
 
 ## Linux Central Server Install
@@ -190,20 +195,47 @@ Invoke-RestMethod `
   -Body '{"projectId":"project-alpha","limit":20}'
 ```
 
+Start Google OAuth for the current Telegram-linked actor:
+
+```powershell
+Invoke-RestMethod `
+  -Method Get `
+  -Uri http://127.0.0.1:3099/api/v1/google/oauth/start `
+  -Headers @{ "X-Actor-Telegram-Id" = "dev-nikolay" }
+```
+
+Read a Google Workspace snapshot for an accessible user:
+
+```powershell
+Invoke-RestMethod `
+  -Method Get `
+  -Uri "http://127.0.0.1:3099/api/v1/google/workspace-snapshot?userId=u-pm-1&period=day" `
+  -Headers @{ "X-Actor-Telegram-Id" = "dev-nikolay" }
+```
+
 ## Telegram Commands
 
 The bot runner supports:
 
 ```text
 /register CODE
+/invite
+/invite u-maksat
+/invite u-pm-1
 /me
 /users
+/agents
 /projects
 /report today
 /report week
 /project project-alpha today
 /project project-alpha week
 /bitrix project-alpha
+/tokens day
+/google_connect
+/google_status
+/google_disconnect
+free-form question, for example: Как сегодня работала Бегайым?
 /help
 ```
 
@@ -211,7 +243,9 @@ The bot runner supports:
 
 By default the service uses a mock read-only Metricon connector so the MVP can
 run without credentials. For real Metricon API access set `METRICON_BASE_URL`
-and `METRICON_ACCESS_TOKEN` through the setup wizard.
+and either `METRICON_ACCESS_TOKEN` or `METRICON_REFRESH_TOKEN` through the setup
+wizard. Refresh token is preferred because Metricon access tokens are short
+lived.
 
 The connector calls:
 
@@ -225,6 +259,56 @@ Swagger handoff:
 ```text
 docs\METRICON_API.md
 ```
+
+## Device Agents
+
+Local device agents report heartbeats to the central server:
+
+```text
+POST /api/v1/device-agents/heartbeat
+X-Device-Agent-Token: <DEVICE_AGENT_INGEST_TOKEN>
+```
+
+Visible device agents can be listed through the API or Telegram:
+
+```text
+GET /api/v1/device-agents
+/agents
+```
+
+macOS lightweight client install:
+
+```bash
+bash scripts/macos/install-device-agent.sh \
+  --user-id u-maksat \
+  --device-id maksat-mac-mini \
+  --display-name "Maksat Mac Mini" \
+  --token "<device-agent-token>" \
+  --run-as-daemon \
+  --start-now
+```
+
+For production macOS clients, use `--run-as-daemon`. This registers
+`/Library/LaunchDaemons/com.company.control-plane.device-agent.plist` and runs
+the lightweight heartbeat agent as the current macOS user from the system
+launchd domain, so it can start without an active GUI session.
+
+Windows lightweight client install:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\install-device-agent-windows.ps1 `
+  -UserId u-nikolay `
+  -DeviceId nikolay-windows `
+  -DisplayName "Nikolay Windows" `
+  -Token "<device-agent-token>" `
+  -RunAsSystem `
+  -StartNow
+```
+
+For production Windows clients, run PowerShell as Administrator and use
+`-RunAsSystem`. This registers the lightweight heartbeat agent as a `SYSTEM`
+startup scheduled task under `C:\ProgramData\CompanyControlPlaneAgent`, so it
+continues to work without an interactive user logon.
 
 ## Bitrix Connector
 

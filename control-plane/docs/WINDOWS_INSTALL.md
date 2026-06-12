@@ -1,8 +1,46 @@
-# Windows Install On Nikolay's 24/7 Computer
+# Windows Install
 
-This install flow is for Nikolay's always-on Windows computer.
+Production now uses the Linux VPS as the central server. Nikolay's Windows
+computer should run only the lightweight device agent that reports into the
+central control plane.
 
-## Server Preflight
+## Production Windows Client
+
+Open PowerShell as Administrator on Nikolay's computer:
+
+```powershell
+cd $env:USERPROFILE\agent\openclawagent\control-plane
+powershell.exe -ExecutionPolicy Bypass -File .\scripts\install-device-agent-windows.ps1 `
+  -UserId u-nikolay `
+  -DeviceId nikolay-windows `
+  -DisplayName "Nikolay Windows" `
+  -Token "<device-agent-token>" `
+  -RunAsSystem `
+  -StartNow
+```
+
+This installs the client agent to:
+
+```text
+C:\ProgramData\CompanyControlPlaneAgent
+```
+
+Windows Scheduled Task:
+
+```text
+CompanyControlPlaneDeviceAgent
+```
+
+The task is registered as `SYSTEM`, starts at boot, and does not require
+Nikolay's interactive Windows session to be logged in.
+
+## Legacy Full Windows Server Install
+
+This path is retained only as an offline fallback. Do not run the full API or
+Telegram bot tasks on Nikolay's Windows computer while the Linux VPS is the
+authoritative central server.
+
+## Legacy Server Preflight
 
 Before installation, run the central server prep checklist:
 
@@ -99,6 +137,7 @@ BOOTSTRAP_OWNER_TELEGRAM_ID=<Nikolay Telegram numeric user id>
 TELEGRAM_BOT_TOKEN=<Telegram bot token>
 METRICON_BASE_URL=<Metricon backend URL>
 METRICON_ACCESS_TOKEN=<Metricon service token>
+METRICON_REFRESH_TOKEN=<Metricon refresh token, preferred>
 BITRIX_WEBHOOK_URL=<Bitrix incoming webhook URL>
 CLAUDE_API_KEY=<Claude API key>
 GOOGLE_OAUTH_CLIENT_JSON=<uploaded JSON content>

@@ -1,5 +1,32 @@
 # macOS install packaging
 
+## Production Lightweight Client
+
+Production now uses the Linux VPS as the central server. macOS employee devices
+should run only the lightweight device agent:
+
+```bash
+cd ~/agent/openclawagent/control-plane
+bash scripts/macos/install-device-agent.sh \
+  --user-id u-maksat \
+  --device-id maksat-mac-mini \
+  --display-name "Maksat Mac Mini" \
+  --token "<device-agent-token>" \
+  --run-as-daemon \
+  --start-now
+```
+
+`--run-as-daemon` writes:
+
+```text
+/Library/LaunchDaemons/com.company.control-plane.device-agent.plist
+```
+
+The daemon runs as the current macOS user, uses the system launchd domain, and
+replaces the older per-user LaunchAgent.
+
+## Legacy Full Local Server Packaging
+
 Build macOS artifacts on a Mac. The scripts create:
 
 - `dist/macos/Company Control Plane.app`

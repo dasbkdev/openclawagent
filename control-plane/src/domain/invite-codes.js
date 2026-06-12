@@ -60,6 +60,56 @@ export function createInviteCode(state, { issuer, userId, ttlMinutes = 60, code 
   return { invite, code: rawCode };
 }
 
+export function reissueInviteCode(state, { issuer, userId, ttlMinutes = 1440, code = undefined, now = new Date() }) {
+  assertCanIssueInvite(issuer);
+
+  const targetUser = getUserById(state, userId);
+  const revokedInvites = revokeActiveInviteCodesForUser(state, {
+    issuer,
+    userId: targetUser.id,
+    reason: "reissued",
+    now,
+  });
+  const created = createInviteCode(state, {
+    issuer,
+    userId: targetUser.id,
+    ttlMinutes,
+    code,
+  });
+
+  return {
+    ...created,
+    targetUser,
+    revokedInvites,
+    revokedCount: revokedInvites.length,
+  };
+}
+
+export function revokeActiveInviteCodesForUser(state, { issuer, userId, reason = "revoked", now = new Date() }) {
+  assertCanIssueInvite(issuer);
+
+  const targetUser = getUserById(state, userId);
+  const nowTime = now.getTime();
+  const nowIso = now.toISOString();
+  const revoked = [];
+
+  for (const invite of state.inviteCodes) {
+    if (invite.userId !== targetUser.id || invite.revokedAt) {
+      continue;
+    }
+    if (new Date(invite.expiresAt).getTime() < nowTime) {
+      continue;
+    }
+
+    invite.revokedAt = nowIso;
+    invite.revokedByUserId = issuer.id;
+    invite.revokedReason = reason;
+    revoked.push(invite);
+  }
+
+  return revoked;
+}
+
 function resolveUniqueInviteCode(state, requestedCode) {
   if (requestedCode) {
     const normalized = normalizeInviteCode(requestedCode);

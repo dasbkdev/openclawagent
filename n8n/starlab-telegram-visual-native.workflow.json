@@ -1,0 +1,1950 @@
+{
+  "id": "starlabTelegramMvp01",
+  "name": "Starlab Agent - Telegram Visual Native",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "starlab-telegram",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "telegram-webhook",
+      "name": "Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "starlab-telegram"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "chatId-5e313b1bdc091",
+              "name": "chatId",
+              "value": "={{ $json.body?.message?.chat?.id || $json.body?.edited_message?.chat?.id || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "telegramUserId-9116daf603fcd",
+              "name": "telegramUserId",
+              "value": "={{ String($json.body?.message?.from?.id || $json.body?.edited_message?.from?.id || '') }}",
+              "type": "string"
+            },
+            {
+              "id": "text-76437172c9ee5",
+              "name": "text",
+              "value": "={{ String($json.body?.message?.text || $json.body?.message?.caption || $json.body?.edited_message?.text || '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "command-3f16b3b086d7",
+              "name": "command",
+              "value": "={{ (String($json.body?.message?.text || $json.body?.edited_message?.text || '').trim().startsWith('/') ? String($json.body?.message?.text || $json.body?.edited_message?.text || '').trim().split(/\\s+/)[0].split('@')[0].toLowerCase() : '') }}",
+              "type": "string"
+            },
+            {
+              "id": "argsText-fb05f564a026",
+              "name": "argsText",
+              "value": "={{ (() => { const t = String($json.body?.message?.text || $json.body?.edited_message?.text || '').trim(); if (!t.startsWith('/')) return t; const first = t.split(/\\s+/)[0]; return t.slice(first.length).trim(); })() }}",
+              "type": "string"
+            },
+            {
+              "id": "isVoice-cd289a12777de",
+              "name": "isVoice",
+              "value": "={{ Boolean($json.body?.message?.voice) }}",
+              "type": "boolean"
+            },
+            {
+              "id": "voiceFileId-231e9e2a67d4f",
+              "name": "voiceFileId",
+              "value": "={{ $json.body?.message?.voice?.file_id || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "voiceMimeType-a0953e9d469b68",
+              "name": "voiceMimeType",
+              "value": "={{ $json.body?.message?.voice?.mime_type || 'audio/ogg' }}",
+              "type": "string"
+            },
+            {
+              "id": "voiceReplyRequested-7e4437fb9fad4",
+              "name": "voiceReplyRequested",
+              "value": "={{ (() => { const text = String($json.body?.message?.text || $json.body?.message?.caption || $json.body?.edited_message?.text || '').toLowerCase(); return text.includes('голос') || text.includes('войс') || text.includes('аудио') || text.includes('voice') || text.includes('audio'); })() }}",
+              "type": "boolean"
+            },
+            {
+              "id": "receivedAt-1d12ff87873328",
+              "name": "receivedAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-telegram",
+      "name": "Extract Telegram Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "outputKey": "Voice",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ String($json.isVoice) }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Text"
+        }
+      },
+      "id": "route-input-type",
+      "name": "Route Input Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/voice/transcribe-telegram' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { fileId: $('Extract Telegram Message').item.json.voiceFileId, mimeType: $('Extract Telegram Message').item.json.voiceMimeType } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "transcribe-telegram-voice",
+      "name": "Transcribe Telegram Voice",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        620,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "chatId-ecac5d1ff54998",
+              "name": "chatId",
+              "value": "={{ $('Extract Telegram Message').item.json.chatId }}",
+              "type": "string"
+            },
+            {
+              "id": "telegramUserId-3405338b77d3e8",
+              "name": "telegramUserId",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}",
+              "type": "string"
+            },
+            {
+              "id": "text-ba821ac456301",
+              "name": "text",
+              "value": "={{ String($json.data?.text || ('Голосовое сообщение не обработано: ' + ($json.error?.message || $json.message || 'STT не настроен'))).trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "command-8a1c140936f45",
+              "name": "command",
+              "value": "={{ (() => { const t = String($json.data?.text || '').trim(); return t.startsWith('/') ? t.split(/\\s+/)[0].split('@')[0].toLowerCase() : ''; })() }}",
+              "type": "string"
+            },
+            {
+              "id": "argsText-2cc31e38ba113",
+              "name": "argsText",
+              "value": "={{ (() => { const t = String($json.data?.text || '').trim(); if (!t.startsWith('/')) return t; const first = t.split(/\\s+/)[0]; return t.slice(first.length).trim(); })() }}",
+              "type": "string"
+            },
+            {
+              "id": "isVoice-14669d6573886",
+              "name": "isVoice",
+              "value": "={{ true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "voiceReplyRequested-7c10c2896abb",
+              "name": "voiceReplyRequested",
+              "value": "={{ Boolean($json.data?.wantsVoiceReply) }}",
+              "type": "boolean"
+            },
+            {
+              "id": "transcriptionProvider-786358202a67d",
+              "name": "transcriptionProvider",
+              "value": "={{ $json.data?.provider || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "transcriptionModel-26097e44f5cd9",
+              "name": "transcriptionModel",
+              "value": "={{ $json.data?.model || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "receivedAt-8c1365a4f2d9f8",
+              "name": "receivedAt",
+              "value": "={{ $('Extract Telegram Message').item.json.receivedAt }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "apply-voice-transcript",
+      "name": "Apply Voice Transcript",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        820,
+        -220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "outputKey": "Help",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/start",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Help",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/help",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Agents",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/agents",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Google Connect",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/google_connect",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Google Status",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/google_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Tokens",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/tokens",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Metricon",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/metricon",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Platrum",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/platrum",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "outputKey": "Platrum Legacy",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.command }}",
+                    "rightValue": "/bitrix",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "AI Assistant"
+        }
+      },
+      "id": "route-request",
+      "name": "Route Request",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "answerText-48b75bc55a2a1",
+              "name": "answerText",
+              "value": "={{ ['Starlab Agent', '', 'Основные команды:', '/agents - статус подключенных устройств', '/metricon maksat - активность сотрудника в Metricon', '/platrum maksat - задачи Platrum по сотруднику и его проектам', '/google_connect - подключить Google аккаунт', '/google_status - проверить Google', '/tokens - расход токенов', '', 'Можно писать обычным текстом:', 'Дай отчет по Максату за неделю по календарю, Platrum и Metricon', 'Сколько Максат работал по Metricon?', 'Дай график Бегайым с 1 по 5 июня'].join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "prepare-help",
+      "name": "Prepare Help Text",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        900,
+        -520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/device-agents' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "get-devices",
+      "name": "Get Device Agents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "answerText-a6a846c41835c8",
+              "name": "answerText",
+              "value": "={{ (() => { const agents = $json.data?.agents || []; if (!agents.length) return 'Подключенные устройства\\n\\nПока устройств не видно.'; return ['Подключенные устройства', '', ...agents.map(a => `${a.displayName || a.deviceId}: ${a.status || 'unknown'}\\nПользователь: ${a.userId || '-'}\\nHost: ${a.hostname || '-'}\\nПоследний сигнал: ${a.lastSeenAt || '-'}`)].join('\\n\\n'); })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-agents",
+      "name": "Format Agents Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        -360
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/google/oauth/start' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "start-google",
+      "name": "Start Google OAuth",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "answerText-8d3524c6549dc",
+              "name": "answerText",
+              "value": "={{ $json.ok ? ['Подключение Google', '', 'Открой ссылку и выдай доступы:', $json.data?.authorizationUrl || $json.data?.url || 'Ссылка не пришла от API'].join('\\n') : ['Google OAuth не готов', '', $json.message || $json.error || 'Control-plane не вернул ссылку подключения.'].join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-google-connect",
+      "name": "Format Google Connect",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/google/status' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "get-google-status",
+      "name": "Get Google Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "answerText-653abc9d4f96e",
+              "name": "answerText",
+              "value": "={{ $json.ok ? ['Google статус', '', `Подключен: ${$json.data?.connected ? 'да' : 'нет'}`, `Аккаунт: ${$json.data?.googleAccountEmail || '-'}`, `Обновлен: ${$json.data?.updatedAt || '-'}`].join('\\n') : ['Google статус', '', $json.message || $json.error || 'Не удалось получить статус.'].join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-google-status",
+      "name": "Format Google Status",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/token-usage/summary?period=day' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "get-token-usage",
+      "name": "Get Token Usage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "answerText-7e842f2d1786d",
+              "name": "answerText",
+              "value": "={{ $json.ok ? ['Токены за 24 часа', '', `Всего: ${$json.data?.summary?.totalTokens || 0}`, `Событий: ${$json.data?.summary?.eventCount || 0}`, `Период: ${$json.data?.period?.from || '-'} - ${$json.data?.period?.to || '-'}`].join('\\n') : ['Токены', '', $json.message || $json.error || 'Доступно только владельцу.'].join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-tokens",
+      "name": "Format Token Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/users/accessible' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "resolve-metricon-target-user",
+      "name": "Resolve Metricon Target User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/reports/metricon/activity-summary' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { targetUserId: (() => {\n  const users = $('Resolve Metricon Target User').item.json.data?.users || [];\n  const text = (($('Extract Telegram Message').item.json.text || '') + ' ' + ($('Extract Telegram Message').item.json.argsText || '')).toLowerCase().replace(/ё/g, 'е');\n  return (users.find(u =>\n    text.includes(String(u.displayName || '').toLowerCase()) ||\n    text.includes(String(u.employeeId || '').toLowerCase()) ||\n    (u.id === 'u-maksat' && (text.includes('максат') || text.includes('maksat'))) ||\n    (u.id === 'u-pm-1' && (text.includes('бегай') || text.includes('бегайым') || text.includes('begay') || text.includes('begoim') || text.includes('pm1')))\n  ) || users[0] || {}).id || 'u-maksat';\n})(), ...(() => {\n  const to = new Date();\n  const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);\n  return { from: from.toISOString(), to: to.toISOString() };\n})() } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "read-metricon-activity",
+      "name": "Read Metricon Activity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1200,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "answerText-cad04fa2dda3a",
+              "name": "answerText",
+              "value": "={{ $json.ok ? ['Metricon активность', '', `Период: ${$json.data?.from || '-'} - ${$json.data?.to || '-'}`, `Источник: ${$json.data?.source || '-'}`, '', ...($json.data?.employees || []).map(e => [`${e.user?.displayName || e.user?.id || '-'}`, `Активность: ${Math.round((e.metrics?.activeSeconds || 0) / 60)} мин`, `Простой: ${Math.round((e.metrics?.idleSeconds || 0) / 60)} мин`, `Всего: ${Math.round((e.metrics?.totalSeconds || 0) / 60)} мин`].join('\\n'))].join('\\n\\n') : ['Metricon активность', '', $json.error?.message || $json.message || $json.error || 'Не удалось получить данные Metricon.'].join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-metricon",
+      "name": "Format Metricon Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1500,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/users/accessible' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "resolve-platrum-target-user",
+      "name": "Resolve Platrum Target User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/reports/platrum/user-status' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { userId: (() => { const users = $('Resolve Platrum Target User').item.json.data?.users || []; const text = (($('Extract Telegram Message').item.json.text || '') + ' ' + ($('Extract Telegram Message').item.json.argsText || '')).toLowerCase().replace(/ё/g, 'е'); return (users.find(u => text.includes(String(u.displayName || '').toLowerCase()) || text.includes(String(u.employeeId || '').toLowerCase()) || (u.id === 'u-maksat' && (text.includes('максат') || text.includes('maksat'))) || (u.id === 'u-pm-1' && (text.includes('бегай') || text.includes('бегайым') || text.includes('begay') || text.includes('begoim') || text.includes('pm1')))) || users[0] || {}).id || 'u-maksat'; })(), limit: 100 } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "read-platrum-user",
+      "name": "Read Platrum User Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1200,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "answerText-b4c80401387d28",
+              "name": "answerText",
+              "value": "={{ $json.ok ? ['Platrum сводка по сотруднику', '', `Сотрудник: ${$json.data?.user?.displayName || '-'}`, `Эффективность: ${$json.data?.combined?.summary?.efficiencyPercent ?? '-'}%`, `Выполнение: ${$json.data?.combined?.summary?.completionPercent ?? '-'}%`, `Всего задач: ${$json.data?.combined?.summary?.total || 0}`, `Открыто: ${$json.data?.combined?.summary?.open || 0}`, `Завершено: ${$json.data?.combined?.summary?.completed || 0}`, `Просрочено: ${$json.data?.combined?.summary?.overdue || 0}`, '', 'Проекты:', ...($json.data?.projects || []).map(p => `- ${p.project?.name || p.project?.id}: ${p.summary?.total ?? 0} задач, эффективность ${p.summary?.efficiencyPercent ?? '-'}%, открыто ${p.summary?.open ?? 0}, просрочено ${p.summary?.overdue ?? 0}`), '', 'Последние задачи:', ...($json.data?.combined?.tasks || []).slice(0,12).map(t => `- ${t.title || t.id}: ${t.statusLabel || '-'}${t.overdue ? ' / просрочено' : ''}`)].join('\\n') : ['Platrum сводка', '', $json.message || $json.error || 'Не удалось получить данные Platrum.'].join('\\n') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-platrum",
+      "name": "Format Platrum Report",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1500,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/me' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ai-get-actor",
+      "name": "AI Get Actor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        900,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/users/accessible' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ai-list-users",
+      "name": "AI List Users",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1200,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/projects/accessible' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ai-list-projects",
+      "name": "AI List Projects",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1500,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/device-agents' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ai-devices",
+      "name": "AI Device Context",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1800,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ (() => { const users = $('AI List Users').item.json.data?.users || []; const text = String($('Extract Telegram Message').item.json.text || '').toLowerCase().replace(/ё/g, 'е'); const target = users.find(u => text.includes(String(u.displayName || '').toLowerCase()) || text.includes(String(u.employeeId || '').toLowerCase()) || (u.id === 'u-maksat' && (text.includes('максат') || text.includes('maksat'))) || (u.id === 'u-pm-1' && (text.includes('бегай') || text.includes('бегайым') || text.includes('begay') || text.includes('begoim')))) || users[0] || { id: 'u-maksat', displayName: 'Maksat', employeeId: 'maksat' }; const name = target.displayName || ''; const employee = target.employeeId || ''; const terms = [name, employee, name + ' Работа', name + ' work', name + ' PM', employee + ' work', 'рабочий график', 'работа', 'ПМ', 'PM', 'work'].filter(Boolean).map(v => '&calendarSearchTerm=' + encodeURIComponent(v)).join(''); return $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/google/workspace-snapshot?period=week' + '&calendarEvents=50&calendarList=200&sharedCalendarMatches=20&sharedCalendarEvents=50' + '&gmailMessages=25&driveFiles=25&documentFiles=8&docCharLimit=5000' + '&userId=' + encodeURIComponent(target.id) + terms; })() }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ai-google",
+      "name": "AI Google Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2100,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/reports/platrum/user-status' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { userId: (() => { const users = $('AI List Users').item.json.data?.users || []; const text = (($('Extract Telegram Message').item.json.text || '') + ' ' + ($('Extract Telegram Message').item.json.argsText || '')).toLowerCase().replace(/ё/g, 'е'); return (users.find(u => text.includes(String(u.displayName || '').toLowerCase()) || text.includes(String(u.employeeId || '').toLowerCase()) || (u.id === 'u-maksat' && (text.includes('максат') || text.includes('maksat'))) || (u.id === 'u-pm-1' && (text.includes('бегай') || text.includes('бегайым') || text.includes('begay') || text.includes('begoim') || text.includes('pm1')))) || users[0] || {}).id || 'u-maksat'; })(), limit: 100 } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ai-platrum",
+      "name": "AI Platrum User Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2100,
+        660
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/reports/metricon/activity-summary' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { targetUserId: (() => {\n  const users = $('AI List Users').item.json.data?.users || [];\n  const text = (($('Extract Telegram Message').item.json.text || '') + ' ' + ($('Extract Telegram Message').item.json.argsText || '')).toLowerCase();\n  return (users.find(u =>\n    text.includes(String(u.displayName || '').toLowerCase()) ||\n    text.includes(String(u.employeeId || '').toLowerCase()) ||\n    (u.id === 'u-maksat' && (text.includes('РјР°РєСЃР°С‚') || text.includes('maksat'))) ||\n    (u.id === 'u-pm-1' && (text.includes('Р±РµРіР°Р№') || text.includes('begay') || text.includes('begoim') || text.includes('pm1')))\n  ) || users[0] || {}).id || 'u-maksat';\n})(), ...(() => {\n  const to = new Date();\n  const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);\n  return { from: from.toISOString(), to: to.toISOString() };\n})() } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "ai-metricon",
+      "name": "AI Metricon Activity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2400,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "brain-80d6bbfd9d9ef8",
+              "name": "brain",
+              "value": "={{ { question: $('Extract Telegram Message').item.json.text, actor: $('AI Get Actor').item.json, accessibleUsers: $('AI List Users').item.json, projects: $('AI List Projects').item.json, devices: $('AI Device Context').item.json, google: $('AI Google Snapshot').item.json, platrum: $('AI Platrum User Status').item.json, metricon: $('AI Metricon Activity').item.json, instructions: 'Use Platrum userStatus first for projects/tasks. Use Metricon activity for actual computer activity, active time, idle time and work-time facts. Always include employee efficiencyPercent when Platrum analytics has it. Platrum and Metricon are read-only: never claim task or Metricon data changes/deletes/approvals. For calendar, prefer sharedCalendars/Other calendars over primary calendar when user asks work schedule. For Gmail, prefer workLikeMessages and ignore obvious personal mail. Produce a clean Russian Telegram report with tables/lists and clear caveats.' } }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "starlab-brain",
+      "name": "Starlab Brain - Build AI Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2550,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.CLAUDE_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { model: $env.CLAUDE_MODEL || 'claude-sonnet-4-6', max_tokens: 2200, temperature: 0.2, system: 'Ты корпоративный AI-ассистент Starlab Agent для Telegram. Отвечай на русском, красиво, структурно и понятно. Не показывай JSON, токены, webhook или debug. Для задач и проектов сначала используй Platrum: combined summary, userTasks, project summaries, dailyReports и analytics. Для фактической активности за компьютером используй Metricon: activeSeconds, idleSeconds, totalSeconds, приложения и сырые поля, если они есть. Всегда показывай эффективность сотрудника в процентах, если есть efficiencyPercent. Platrum и Metricon доступны только для чтения: никогда не говори, что создал, изменил, удалил, согласовал или переместил задачу или данные активности. Для календаря сначала используй sharedCalendars / Другие календари, а primary calendar считай вторичным. Для Gmail используй workLikeMessages и отделяй личные письма от рабочих. Если данных нет, честно скажи, каких именно данных не хватает и что проверить.', messages: [{ role: 'user', content: ['Вопрос пользователя: ' + $('Extract Telegram Message').item.json.text, '', 'Starlab Brain context:', JSON.stringify($json.brain)].join('\\n') }] } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "claude-assistant",
+      "name": "Claude Assistant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2850,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "answerText-eee737b5f324c8",
+              "name": "answerText",
+              "value": "={{ $json.content?.map(c => c.text || '').join('\\n').trim() || $json.error?.message || $json.message || 'Claude сейчас не ответил. Проверь API key, credits/model access.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-claude",
+      "name": "Extract Claude Answer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3000,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "outputKey": "Voice Reply",
+              "conditions": {
+                "options": {
+                  "caseSensitive": false,
+                  "leftValue": "",
+                  "typeValidation": "strict"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ (() => { const msg = $('Extract Telegram Message').item.json; const text = String(msg.text || '').toLowerCase(); return String(Boolean(msg.isVoice || msg.voiceReplyRequested || text.includes('голос') || text.includes('войс') || text.includes('аудио') || text.includes('voice') || text.includes('audio'))); })() }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Text Reply"
+        }
+      },
+      "id": "route-reply-type",
+      "name": "Route Reply Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        3160,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CONTROL_PLANE_INTERNAL_URL + '/api/v1/voice/send-telegram' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-actor-telegram-id",
+              "value": "={{ $('Extract Telegram Message').item.json.telegramUserId }}"
+            },
+            {
+              "name": "accept",
+              "value": "application/json"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { chatId: $('Extract Telegram Message').item.json.chatId, text: String($json.answerText || '').slice(0, 3900), caption: 'Ответ голосом' } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "send-telegram-voice",
+      "name": "Send Telegram Voice Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3300,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/sendMessage' }}",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { chat_id: $('Extract Telegram Message').item.json.chatId, text: String($json.answerText || 'Пустой ответ').slice(0, 3900), disable_web_page_preview: true } }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3300,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Route Input Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Input Type": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Telegram Voice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Telegram Voice": {
+      "main": [
+        [
+          {
+            "node": "Apply Voice Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Voice Transcript": {
+      "main": [
+        [
+          {
+            "node": "Route Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Request": {
+      "main": [
+        [
+          {
+            "node": "Prepare Help Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Help Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Device Agents",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Start Google OAuth",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Google Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Token Usage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Metricon Target User",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Platrum Target User",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resolve Platrum Target User",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Get Actor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Help Text": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Device Agents": {
+      "main": [
+        [
+          {
+            "node": "Format Agents Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Agents Report": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Google OAuth": {
+      "main": [
+        [
+          {
+            "node": "Format Google Connect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Google Connect": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Google Status": {
+      "main": [
+        [
+          {
+            "node": "Format Google Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Google Status": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Token Usage": {
+      "main": [
+        [
+          {
+            "node": "Format Token Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Token Report": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Metricon Target User": {
+      "main": [
+        [
+          {
+            "node": "Read Metricon Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Metricon Activity": {
+      "main": [
+        [
+          {
+            "node": "Format Metricon Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Metricon Report": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Platrum Target User": {
+      "main": [
+        [
+          {
+            "node": "Read Platrum User Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Platrum User Status": {
+      "main": [
+        [
+          {
+            "node": "Format Platrum Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Platrum Report": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Get Actor": {
+      "main": [
+        [
+          {
+            "node": "AI List Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI List Users": {
+      "main": [
+        [
+          {
+            "node": "AI List Projects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI List Projects": {
+      "main": [
+        [
+          {
+            "node": "AI Device Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Device Context": {
+      "main": [
+        [
+          {
+            "node": "AI Google Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Google Snapshot": {
+      "main": [
+        [
+          {
+            "node": "AI Platrum User Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Platrum User Status": {
+      "main": [
+        [
+          {
+            "node": "AI Metricon Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Metricon Activity": {
+      "main": [
+        [
+          {
+            "node": "Starlab Brain - Build AI Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Starlab Brain - Build AI Context": {
+      "main": [
+        [
+          {
+            "node": "Claude Assistant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Assistant": {
+      "main": [
+        [
+          {
+            "node": "Extract Claude Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Claude Answer": {
+      "main": [
+        [
+          {
+            "node": "Route Reply Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Reply Type": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Voice Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Telegram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "pinData": {},
+  "tags": [],
+  "triggerCount": 0,
+  "versionId": "starlab-telegram-visual-native-2"
+}

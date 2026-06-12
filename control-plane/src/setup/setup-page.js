@@ -162,7 +162,7 @@ export function renderSetupPage() {
     <header>
       <div>
         <h1>Company Control Plane Setup</h1>
-        <p class="subtitle">Первичная настройка локального сервиса Николая: Telegram, Google OAuth, Claude, Bitrix и Metricon. Секреты сохраняются зашифрованными и показываются только в маске.</p>
+        <p class="subtitle">Первичная настройка сервиса Starlab Agent: Telegram, Google OAuth, Claude, Bitrix, Metricon и голосовые ответы. Секреты сохраняются зашифрованными и показываются только в маске.</p>
       </div>
       <div class="status" id="setupStatus">Статус<strong>Загрузка</strong></div>
     </header>
@@ -187,21 +187,107 @@ export function renderSetupPage() {
         <p class="hint" id="claudeModelPolicy">Default model: latest Sonnet</p>
       </section>
 
+      <section class="full">
+        <h2>Voice Assistant</h2>
+        <label for="voiceAssistantEnabled">Voice enabled</label>
+        <input id="voiceAssistantEnabled" name="voiceAssistantEnabled" autocomplete="off" placeholder="true">
+        <p class="hint">true включает обработку Telegram voice. false полностью отключает голосовой режим.</p>
+
+        <label for="voiceReplyMode">Reply mode</label>
+        <input id="voiceReplyMode" name="voiceReplyMode" autocomplete="off" placeholder="on_request">
+        <p class="hint">on_request - голосом только когда пользователь просит. always_text - всегда текстом. always_voice - всегда голосом, если ElevenLabs настроен.</p>
+
+        <label for="sttProvider">STT Provider</label>
+        <input id="sttProvider" name="sttProvider" autocomplete="off" placeholder="elevenlabs">
+        <p class="hint">elevenlabs или openai. Для ElevenLabs можно использовать тот же API key, что и для озвучки.</p>
+
+        <label for="sttApiKey">STT API Key</label>
+        <input id="sttApiKey" name="sttApiKey" type="password" autocomplete="off" placeholder="optional">
+        <div class="masked" data-secret="sttApiKey"></div>
+        <p class="hint">Если оставить пустым и выбран elevenlabs, будет использован ElevenLabs API Key. Для openai укажи OpenAI API key.</p>
+
+        <label for="sttModel">STT Model</label>
+        <input id="sttModel" name="sttModel" autocomplete="off" placeholder="scribe_v2">
+
+        <label for="sttLanguageCode">STT Language Code</label>
+        <input id="sttLanguageCode" name="sttLanguageCode" autocomplete="off" placeholder="ru">
+        <p class="hint">Можно оставить пустым для автоопределения языка.</p>
+
+        <label for="elevenLabsApiKey">ElevenLabs API Key</label>
+        <input id="elevenLabsApiKey" name="elevenLabsApiKey" type="password" autocomplete="off" placeholder="xi-api-key">
+        <div class="masked" data-secret="elevenLabsApiKey"></div>
+
+        <label for="elevenLabsVoiceId">ElevenLabs Voice ID</label>
+        <input id="elevenLabsVoiceId" name="elevenLabsVoiceId" autocomplete="off" placeholder="voice_id">
+        <p class="hint">ID голоса берется в ElevenLabs в разделе Voices. Без Voice ID бот сможет понимать голосовые, но не сможет отвечать голосом.</p>
+
+        <label for="elevenLabsTtsModel">ElevenLabs TTS Model</label>
+        <input id="elevenLabsTtsModel" name="elevenLabsTtsModel" autocomplete="off" placeholder="eleven_multilingual_v2">
+
+        <label for="elevenLabsOutputFormat">ElevenLabs Output Format</label>
+        <input id="elevenLabsOutputFormat" name="elevenLabsOutputFormat" autocomplete="off" placeholder="mp3_44100_128">
+      </section>
+
       <section>
         <h2>Metricon</h2>
         <label for="kickidlerBaseUrl">API Base URL</label>
-        <input id="kickidlerBaseUrl" name="kickidlerBaseUrl" autocomplete="off" placeholder="http://85.239.49.208:8080">
+        <input id="kickidlerBaseUrl" name="kickidlerBaseUrl" autocomplete="off" placeholder="http://metriconapp.com">
 
         <label for="kickidlerAccessToken">Access Token</label>
         <input id="kickidlerAccessToken" name="kickidlerAccessToken" type="password" autocomplete="off">
         <div class="masked" data-secret="kickidlerAccessToken"></div>
+
+        <label for="kickidlerRefreshToken">Refresh Token</label>
+        <input id="kickidlerRefreshToken" name="kickidlerRefreshToken" type="password" autocomplete="off">
+        <div class="masked" data-secret="kickidlerRefreshToken"></div>
+        <p class="hint">Recommended for Metricon: access tokens are short-lived and are refreshed automatically.</p>
+
+        <label for="kickidlerUsername">Service login/email</label>
+        <input id="kickidlerUsername" name="kickidlerUsername" type="password" autocomplete="off" placeholder="service user email">
+        <div class="masked" data-secret="kickidlerUsername"></div>
+
+        <label for="kickidlerPassword">Service password</label>
+        <input id="kickidlerPassword" name="kickidlerPassword" type="password" autocomplete="off" placeholder="service user password">
+        <div class="masked" data-secret="kickidlerPassword"></div>
+        <p class="hint">Used only as a fallback when Metricon refresh token is expired or rejected. All agent operations stay read-only.</p>
       </section>
 
       <section>
-        <h2>Bitrix</h2>
+        <h2>Platrum</h2>
+        <label for="platrumBaseUrl">API Base URL</label>
+        <input id="platrumBaseUrl" name="platrumBaseUrl" autocomplete="off" placeholder="https://platrum.starlabit.com">
+        <p class="hint">Primary read-only source for employees, projects, kanban tasks, daily reports, attendance and team metrics.</p>
+
+        <label for="platrumUsername">Username</label>
+        <input id="platrumUsername" name="platrumUsername" type="password" autocomplete="off" placeholder="service user login">
+        <div class="masked" data-secret="platrumUsername"></div>
+
+        <label for="platrumPassword">Password</label>
+        <input id="platrumPassword" name="platrumPassword" type="password" autocomplete="off" placeholder="service user password">
+        <div class="masked" data-secret="platrumPassword"></div>
+        <p class="hint">The agent uses this account only through the server-side read-only guard. Task changes, deletes and writes are blocked before network requests.</p>
+      </section>
+
+      <section>
+        <h2>YouGile (reserved)</h2>
+        <label for="yougileEnabled">Enabled</label>
+        <input id="yougileEnabled" name="yougileEnabled" autocomplete="off" placeholder="false">
+        <p class="hint">Keep false until users, projects, boards and columns are mapped. Create/update operations will also require explicit confirmation; delete is permanently blocked.</p>
+
+        <label for="yougileBaseUrl">API Base URL</label>
+        <input id="yougileBaseUrl" name="yougileBaseUrl" autocomplete="off" placeholder="https://yougile.com/api-v2">
+
+        <label for="yougileApiKey">API Key</label>
+        <input id="yougileApiKey" name="yougileApiKey" type="password" autocomplete="off" placeholder="leave empty for now">
+        <div class="masked" data-secret="yougileApiKey"></div>
+      </section>
+
+      <section>
+        <h2>Bitrix Legacy</h2>
         <label for="bitrixWebhookUrl">Incoming Webhook URL</label>
         <input id="bitrixWebhookUrl" name="bitrixWebhookUrl" type="password" autocomplete="off" placeholder="https://example.bitrix24.ru/rest/...">
         <div class="masked" data-secret="bitrixWebhookUrl"></div>
+        <p class="hint">Legacy fallback only. New task/project reports should use Platrum.</p>
       </section>
 
       <section class="full">
@@ -260,9 +346,28 @@ export function renderSetupPage() {
           "claudeApiKey",
           "kickidlerBaseUrl",
           "kickidlerAccessToken",
+          "kickidlerRefreshToken",
+          "kickidlerUsername",
+          "kickidlerPassword",
+          "platrumBaseUrl",
+          "platrumUsername",
+          "platrumPassword",
           "bitrixWebhookUrl",
           "tokenReportRecipientTelegramId",
           "tokenUsageIngestToken",
+          "voiceAssistantEnabled",
+          "voiceReplyMode",
+          "sttProvider",
+          "sttApiKey",
+          "sttModel",
+          "sttLanguageCode",
+          "elevenLabsApiKey",
+          "elevenLabsVoiceId",
+          "elevenLabsTtsModel",
+          "elevenLabsOutputFormat",
+          "yougileEnabled",
+          "yougileBaseUrl",
+          "yougileApiKey",
           "googleOAuthClientJson",
         ]) {
           const value = form.elements[key].value.trim();
@@ -294,8 +399,16 @@ export function renderSetupPage() {
         "telegramBotToken",
         "claudeApiKey",
         "kickidlerAccessToken",
+        "kickidlerRefreshToken",
+        "kickidlerUsername",
+        "kickidlerPassword",
+        "platrumUsername",
+        "platrumPassword",
         "bitrixWebhookUrl",
         "tokenUsageIngestToken",
+        "sttApiKey",
+        "elevenLabsApiKey",
+        "yougileApiKey",
         "googleOAuthClientJson",
       ]) {
         form.elements[key].value = "";
@@ -320,7 +433,18 @@ export function renderSetupPage() {
       setupStatus.innerHTML = "Статус<strong>" + (data.configured ? "Готово" : "Нужна настройка") + "</strong>";
       form.elements.bootstrapOwnerTelegramId.value = data.settings.bootstrapOwnerTelegramId || "";
       form.elements.kickidlerBaseUrl.value = data.settings.kickidlerBaseUrl || "";
+      form.elements.platrumBaseUrl.value = data.settings.platrumBaseUrl || "https://platrum.starlabit.com";
+      form.elements.yougileEnabled.value = data.settings.yougileEnabled || "false";
+      form.elements.yougileBaseUrl.value = data.settings.yougileBaseUrl || "https://yougile.com/api-v2";
       form.elements.tokenReportRecipientTelegramId.value = data.settings.tokenReportRecipientTelegramId || "984834133";
+      form.elements.voiceAssistantEnabled.value = data.settings.voiceAssistantEnabled || "true";
+      form.elements.voiceReplyMode.value = data.settings.voiceReplyMode || "on_request";
+      form.elements.sttProvider.value = data.settings.sttProvider || "elevenlabs";
+      form.elements.sttModel.value = data.settings.sttModel || "scribe_v2";
+      form.elements.sttLanguageCode.value = data.settings.sttLanguageCode || "";
+      form.elements.elevenLabsVoiceId.value = data.settings.elevenLabsVoiceId || "";
+      form.elements.elevenLabsTtsModel.value = data.settings.elevenLabsTtsModel || "eleven_multilingual_v2";
+      form.elements.elevenLabsOutputFormat.value = data.settings.elevenLabsOutputFormat || "mp3_44100_128";
       const modelPolicy = data.modelPolicy || {};
       document.getElementById("claudeModelPolicy").textContent =
         "Default model for all users: " + (modelPolicy.openClawModel || "latest Sonnet");

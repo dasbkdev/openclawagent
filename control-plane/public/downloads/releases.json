@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-06-11T06:02:05.396Z",
+  "platforms": {
+    "windows": {
+      "version": "2026.6.7",
+      "url": "/downloads/starlab-openclaw-agent-windows.exe",
+      "sha256": "cb1cb29d79afc5352533288cfff2ceb9567f33a46d14bc86a0a7d80d09d272f1",
+      "notes": "Reliable YouTube direct-video playback, contextual numeric retry choices, autostart and verified update downloads."
+    },
+    "macos": {
+      "version": "2026.6.5",
+      "url": "/downloads/starlab-openclaw-agent-macos-universal.dmg",
+      "sha256": "3ef91cac41bb464bc51af4dc6e8ee216819a9ebd6dd274f69f4209402a53b93d",
+      "notes": "Current public macOS build. The 2026.6.6 source is ready for the next signed or locally approved build."
+    }
+  }
+}

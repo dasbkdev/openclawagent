@@ -42,12 +42,38 @@ export async function buildKickidlerActivitySummary(state, { actor, request, kic
       const metrics = summary.employees.find(
         (item) => String(item.kickidlerEmployeeId) === String(user.kickidlerEmployeeId),
       );
+      const normalized = normalizeMetriconMetrics(metrics);
       return {
         user: publicUser(user),
-        metrics: metrics ?? null,
+        metrics: metrics ? { ...metrics, ...normalized } : null,
       };
     }),
   };
+}
+
+function normalizeMetriconMetrics(item) {
+  const raw = item?.raw?.data || item?.raw || item || {};
+  return {
+    activeSeconds: firstNumber(raw, item, [
+      "activeSeconds",
+      "totalActiveTime",
+      "activeTime",
+      "activitySeconds",
+      "productiveSeconds",
+    ]),
+    idleSeconds: firstNumber(raw, item, ["idleSeconds", "totalIdleTime", "idleTime"]),
+    totalSeconds: firstNumber(raw, item, ["totalSeconds", "totalTime", "workTimeSeconds", "workedSeconds"]),
+  };
+}
+
+function firstNumber(primary, secondary, keys) {
+  for (const key of keys) {
+    const value = Number(primary?.[key] ?? secondary?.[key]);
+    if (Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function resolveTargetUsers(state, actor, request) {

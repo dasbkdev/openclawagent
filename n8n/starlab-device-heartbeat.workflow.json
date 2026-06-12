@@ -1,0 +1,60 @@
+{
+  "id": "starlabDeviceHeartbeatMirror01",
+  "name": "Starlab Device Heartbeat Mirror",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "device-agent-heartbeat",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "device-heartbeat-webhook",
+      "name": "Device Heartbeat Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "device-agent-heartbeat"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require(\"fs\");\nconst path = require(\"path\");\n\nconst DATA_DIR = env(\"STARLAB_N8N_DATA_DIR\", \"/data\");\nconst DATA_FILE = path.join(DATA_DIR, \"device-heartbeats.json\");\n\nconst input = $input.first()?.json || {};\nconst body = input.body || input;\nconst headers = input.headers || {};\nconst now = new Date().toISOString();\n\nconst deviceId = String(body.deviceId || body.device_id || \"unknown-device\").trim();\nconst userId = String(body.userId || body.user_id || \"unknown-user\").trim();\n\nfs.mkdirSync(DATA_DIR, { recursive: true });\nconst state = readJson(DATA_FILE, {\n  version: 1,\n  updatedAt: null,\n  totalReceived: 0,\n  devices: {},\n});\n\nconst previous = state.devices[deviceId] || {};\nstate.totalReceived = Number(state.totalReceived || 0) + 1;\nstate.updatedAt = now;\nstate.devices[deviceId] = {\n  deviceId,\n  userId,\n  displayName: body.displayName || body.display_name || null,\n  hostname: body.hostname || null,\n  platform: body.platform || null,\n  arch: body.arch || null,\n  osRelease: body.osRelease || body.os_release || null,\n  agentVersion: body.agentVersion || body.agent_version || null,\n  capabilities: Array.isArray(body.capabilities) ? body.capabilities : [],\n  labels: body.labels && typeof body.labels === \"object\" ? body.labels : {},\n  firstSeenAt: previous.firstSeenAt || now,\n  lastSeenAt: now,\n  heartbeatCount: Number(previous.heartbeatCount || 0) + 1,\n  source: \"nginx-mirror\",\n  remoteAddress:\n    headers[\"x-forwarded-for\"] ||\n    headers[\"x-real-ip\"] ||\n    headers[\"X-Forwarded-For\"] ||\n    headers[\"X-Real-IP\"] ||\n    null,\n};\n\nwriteJson(DATA_FILE, state);\n\nreturn [{\n  json: {\n    ok: true,\n    receivedAt: now,\n    deviceId,\n    userId,\n    heartbeatCount: state.devices[deviceId].heartbeatCount,\n  },\n}];\n\nfunction readJson(filePath, fallback) {\n  try {\n    return JSON.parse(fs.readFileSync(filePath, \"utf8\"));\n  } catch {\n    return fallback;\n  }\n}\n\nfunction writeJson(filePath, value) {\n  const tempPath = `${filePath}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;\n  fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\\n`, { mode: 0o600 });\n  fs.renameSync(tempPath, filePath);\n}\n\nfunction env(name, fallback = \"\") {\n  try {\n    if (typeof $env !== \"undefined\" && $env && $env[name] !== undefined && $env[name] !== null) {\n      return String($env[name]);\n    }\n  } catch {\n    // n8n Code node exposes env through $env; keep a safe fallback for tests.\n  }\n  return fallback;\n}\n"
+      },
+      "id": "device-heartbeat-store",
+      "name": "Store Heartbeat Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        280,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Device Heartbeat Webhook": {
+      "main": [
+        [
+          {
+            "node": "Store Heartbeat Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2026-06-08T09:39:58.465Z",
+  "versionId": "starlab-device-heartbeat-mirror-1",
+  "active": true
+}

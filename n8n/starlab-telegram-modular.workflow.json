@@ -1,0 +1,210 @@
+{
+  "id": "starlabTelegramMvp01",
+  "name": "Starlab Agent - Telegram Modular",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "starlab-telegram",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "telegram-webhook",
+      "name": "Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "starlab-telegram"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const update = $input.first()?.json?.body || $input.first()?.json || {};\nconst message = update.message || update.edited_message || null;\n\nif (!message?.chat?.id) {\n  return [{ json: { ok: true, skip: true, reason: \"No Telegram message in update\" } }];\n}\n\nconst text = String(message.text || message.caption || \"\").trim();\nconst command = parseCommand(text);\n\nreturn [{\n  json: {\n    ok: true,\n    updateId: update.update_id || null,\n    message,\n    chatId: message.chat.id,\n    telegramUserId: String(message.from?.id || \"\"),\n    username: message.from?.username || null,\n    firstName: message.from?.first_name || null,\n    text,\n    command,\n    isVoice: Boolean(message.voice),\n    voice: message.voice || null,\n    receivedAt: new Date().toISOString(),\n  },\n}];\n\nfunction parseCommand(value) {\n  const raw = String(value || \"\").trim();\n  if (!raw.startsWith(\"/\")) {\n    return { name: \"\", argsText: raw, args: [] };\n  }\n  const [commandRaw, ...args] = raw.split(/\\s+/u);\n  return {\n    name: commandRaw.split(\"@\")[0].toLowerCase(),\n    args,\n    argsText: raw.slice(commandRaw.length).trim(),\n  };\n}\n"
+      },
+      "id": "parse-telegram",
+      "name": "Parse Telegram Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require(\"fs\");\nconst crypto = require(\"crypto\");\nconst { URL } = require(\"url\");\n\nconst input = $input.first().json;\nif (input.skip) return [{ json: input }];\n\nconst STATE_PATH = \"/legacy-data/control-plane.json\";\nconst SECRETS_PATH = \"/legacy-data/secrets.json\";\nconst SECRETS_KEY_PATH = \"/legacy-data/secrets.key\";\nconst PUBLIC_BASE_URL = \"https://starlabagent.pp.ua\";\n\nconst state = JSON.parse(fs.readFileSync(STATE_PATH, \"utf8\"));\nconst actor = resolveActor(state, input.telegramUserId);\nconst command = input.command || { name: \"\", argsText: \"\" };\n\nif (!actor && ![\"/start\", \"/help\"].includes(command.name)) {\n  return [{ json: { ...input, responseText: [\n    \"Starlab Agent\",\n    \"\",\n    \"Этот Telegram аккаунт пока не привязан к сотруднику.\",\n    \"Попроси Николая выдать invite-код и отправь:\",\n    \"/register КОД\",\n  ].join(\"\\n\") } }];\n}\n\nconst accessible = actor ? accessibleUsers(state, actor) : [];\nconst question = command.argsText || input.text || \"\";\nconst targets = actor ? resolveTargetUsers({ state, actor, question }) : [];\nconst period = resolvePeriod(input.text || \"\");\n\nlet responseText = null;\nif ([\"/start\", \"/help\"].includes(command.name)) {\n  responseText = [\n    \"Starlab Agent\",\n    actor ? `Профиль: ${actor.displayName} (${formatRole(actor.role)})` : \"Профиль еще не привязан.\",\n    \"\",\n    \"Основные команды:\",\n    \"/agents - подключенные устройства\",\n    \"/bitrix maksat - задачи сотрудника в Bitrix\",\n    \"/google_connect - подключить Google\",\n    \"/google_status - статус Google\",\n    \"/ai_status - проверка Claude\",\n    \"\",\n    \"Можно писать обычным текстом:\",\n    \"Какие задачи сейчас у Максата?\",\n    \"Дай график Бегайым с 1 по 5 июня.\",\n  ].join(\"\\n\");\n}\n\nif (command.name === \"/google_connect\" && actor) {\n  responseText = buildGoogleConnect(actor);\n}\n\nif (command.name === \"/tokens\") {\n  const events = state.tokenUsageEvents || [];\n  const since = Date.now() - 24 * 60 * 60 * 1000;\n  const recent = events.filter((event) => new Date(event.createdAt || event.timestamp || 0).getTime() >= since);\n  const total = recent.reduce((sum, event) => sum + Number(event.totalTokens || 0), 0);\n  responseText = [\n    \"Токены за последние 24 часа\",\n    \"\",\n    `Событий: ${recent.length}`,\n    `Токенов всего: ${total}`,\n  ].join(\"\\n\");\n}\n\nreturn [{\n  json: {\n    ...input,\n    actor: actor ? publicUser(actor) : null,\n    accessPolicy: actor ? describeAccess(actor) : null,\n    accessibleUsers: accessible.map(publicUser),\n    targetUsers: targets.map(publicUser),\n    period,\n    responseText,\n    needsBitrix: !responseText && needsBitrix(input.text, command),\n    needsGoogle: !responseText && needsGoogle(input.text, command),\n    needsDevices: !responseText && (command.name === \"/agents\" || /агент|устройств|device|компьютер/iu.test(input.text || \"\")),\n    needsClaude: !responseText && ![\"/agents\", \"/bitrix\", \"/google_status\"].includes(command.name),\n  },\n}];\n\nfunction resolveActor(state, telegramUserId) {\n  return (state.users || []).find((user) => String(user.telegram?.telegramUserId || \"\") === String(telegramUserId)) || null;\n}\n\nfunction accessibleUsers(state, actor) {\n  if (actor.role === \"OWNER\") return state.users || [];\n  if (actor.role === \"SENIOR_PM\") return (state.users || []).filter((user) => user.id === actor.id || user.managerId === actor.id);\n  return (state.users || []).filter((user) => user.id === actor.id);\n}\n\nfunction resolveTargetUsers({ state, actor, question }) {\n  const users = accessibleUsers(state, actor);\n  const normalized = normalize(question);\n  const mentioned = users.filter((user) => aliases(user).some((alias) => normalize(alias) && normalized.includes(normalize(alias))));\n  if (mentioned.length) return mentioned;\n  if (/\\b(все|команд|pm|пм|сотрудник|подчинен)/iu.test(question)) return users;\n  if (actor.role === \"PM\") return [actor];\n  return users.slice(0, Math.min(users.length, 3));\n}\n\nfunction aliases(user) {\n  const base = [user.id, user.employeeId, user.displayName, user.telegram?.username, String(user.kickidlerEmployeeId || \"\")];\n  if (user.id === \"u-nikolay\") base.push(\"николай\", \"николая\", \"nikolay\", \"nikolai\");\n  if (user.id === \"u-maksat\") base.push(\"максат\", \"максата\", \"максату\", \"maksat\");\n  if (user.id === \"u-pm-1\") base.push(\"бегайым\", \"бегайим\", \"бегайым пм\", \"begayym\", \"begoim\", \"pm1\");\n  return base.filter(Boolean);\n}\n\nfunction publicUser(user) {\n  return {\n    id: user.id,\n    displayName: user.displayName,\n    role: user.role,\n    employeeId: user.employeeId,\n    managerId: user.managerId,\n    bitrixUserId: user.bitrixUserId ?? null,\n    kickidlerEmployeeId: user.kickidlerEmployeeId ?? null,\n    projectIds: user.projectIds || [],\n    telegramLinked: Boolean(user.telegram?.telegramUserId),\n  };\n}\n\nfunction needsBitrix(text, command) {\n  return command.name === \"/bitrix\" || /битрикс|bitrix|задач|таск|проект|канбан|просроч/iu.test(text || \"\");\n}\n\nfunction needsGoogle(text, command) {\n  return command.name === \"/google_status\" || /google|календар|график|расписан|отработал|gmail|drive|docs|sheets/iu.test(text || \"\");\n}\n\nfunction buildGoogleConnect(actor) {\n  const clientRaw = readSecret(\"googleOAuthClientJson\");\n  const stateSecret = readSecret(\"googleOAuthStateSecret\");\n  if (!clientRaw || !stateSecret) return \"Google OAuth пока не настроен в setup.\";\n  const parsed = JSON.parse(clientRaw);\n  const client = parsed.web || parsed.installed || parsed;\n  const redirectUri = `${PUBLIC_BASE_URL}/api/v1/google/oauth/callback`;\n  const stateValue = signState({ userId: actor.id, nonce: crypto.randomBytes(12).toString(\"base64url\"), iat: new Date().toISOString() }, stateSecret);\n  const url = new URL(\"https://accounts.google.com/o/oauth2/v2/auth\");\n  url.searchParams.set(\"client_id\", client.client_id);\n  url.searchParams.set(\"redirect_uri\", redirectUri);\n  url.searchParams.set(\"response_type\", \"code\");\n  url.searchParams.set(\"scope\", [\n    \"openid\", \"email\", \"profile\",\n    \"https://www.googleapis.com/auth/calendar.readonly\",\n    \"https://www.googleapis.com/auth/gmail.readonly\",\n    \"https://www.googleapis.com/auth/drive.readonly\",\n    \"https://www.googleapis.com/auth/documents.readonly\",\n    \"https://www.googleapis.com/auth/spreadsheets.readonly\",\n  ].join(\" \"));\n  url.searchParams.set(\"access_type\", \"offline\");\n  url.searchParams.set(\"prompt\", \"consent\");\n  url.searchParams.set(\"include_granted_scopes\", \"true\");\n  url.searchParams.set(\"state\", stateValue);\n  return [\"Подключение Google\", \"\", \"Открой ссылку и выдай доступы:\", url.toString()].join(\"\\n\");\n}\n\nfunction readSecret(name) {\n  const raw = JSON.parse(fs.readFileSync(SECRETS_PATH, \"utf8\"));\n  const item = raw.items?.[name];\n  if (!item) return null;\n  const key = Buffer.from(fs.readFileSync(SECRETS_KEY_PATH, \"utf8\").trim(), \"base64\");\n  const decipher = crypto.createDecipheriv(\"aes-256-gcm\", key, Buffer.from(item.iv, \"base64\"));\n  decipher.setAuthTag(Buffer.from(item.tag, \"base64\"));\n  return Buffer.concat([decipher.update(Buffer.from(item.ciphertext, \"base64\")), decipher.final()]).toString(\"utf8\");\n}\n\nfunction signState(payload, secret) {\n  const encoded = Buffer.from(JSON.stringify(payload), \"utf8\").toString(\"base64url\");\n  const signature = crypto.createHmac(\"sha256\", secret).update(encoded).digest(\"base64url\");\n  return `${encoded}.${signature}`;\n}\n\nfunction describeAccess(actor) {\n  if (actor.role === \"OWNER\") return \"OWNER can access all employees and projects.\";\n  if (actor.role === \"SENIOR_PM\") return \"SENIOR_PM can access self and subordinate PM employees.\";\n  return \"PM can access only own scope.\";\n}\n\nfunction resolvePeriod(text) {\n  const explicit = explicitDateRange(normalize(text));\n  if (explicit) return explicit;\n  if (/недел|week/u.test(normalize(text))) {\n    const end = new Date();\n    const start = new Date(end.getTime() - 7 * 86400000);\n    return { label: \"последние 7 дней\", from: start.toISOString(), to: end.toISOString() };\n  }\n  const now = new Date();\n  return { label: \"сегодня\", from: bishkek(now, false).toISOString(), to: bishkek(now, true).toISOString() };\n}\n\nfunction explicitDateRange(text) {\n  const m = text.match(/(?:с\\s*)?(\\d{1,2})[./-](\\d{1,2})\\s*(?:по|до|-)\\s*(\\d{1,2})[./-](\\d{1,2})(?:[./-](\\d{2,4}))?/iu);\n  if (!m) return null;\n  let year = Number(m[5] || new Date().getFullYear());\n  if (year < 100) year += 2000;\n  return {\n    label: `${m[1]}.${m[2]}.${year} - ${m[3]}.${m[4]}.${year}`,\n    from: new Date(`${year}-${pad(m[2])}-${pad(m[1])}T00:00:00.000+06:00`).toISOString(),\n    to: new Date(`${year}-${pad(m[4])}-${pad(m[3])}T23:59:59.999+06:00`).toISOString(),\n  };\n}\n\nfunction bishkek(date, end) {\n  return new Date(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${end ? \"23:59:59.999\" : \"00:00:00.000\"}+06:00`);\n}\n\nfunction pad(value) { return String(value).padStart(2, \"0\"); }\nfunction formatRole(role) { return ({ OWNER: \"владелец\", SENIOR_PM: \"старший PM\", PM: \"PM\" })[role] || role; }\nfunction normalize(value) { return String(value || \"\").toLowerCase().replace(/ё/gu, \"е\").replace(/[^a-zа-я0-9]+/giu, \" \").replace(/\\s+/gu, \" \").trim(); }\n"
+      },
+      "id": "access-scope",
+      "name": "Access Scope & Commands",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require(\"fs\");\nconst crypto = require(\"crypto\");\nconst http = require(\"http\");\nconst https = require(\"https\");\nconst { URL } = require(\"url\");\n\nconst input = $input.first().json;\nif (input.skip || input.responseText || !input.needsBitrix) return [{ json: { ...input, bitrix: { requested: false } } }];\n\nconst webhookUrl = trimSlash(readSecret(\"bitrixWebhookUrl\"));\nif (!webhookUrl) return [{ json: { ...input, bitrix: { requested: true, configured: false, error: \"Bitrix webhook is not configured\" } } }];\n\nconst userTasks = [];\nfor (const user of input.targetUsers || []) {\n  if (!user.bitrixUserId) {\n    userTasks.push({ user, summary: summary([]), tasks: [], note: \"Bitrix user id не задан.\" });\n    continue;\n  }\n  try {\n    const payload = await bitrixCall(webhookUrl, \"tasks.task.list\", {\n      order: { DEADLINE: \"asc\", CHANGED_DATE: \"desc\", ID: \"desc\" },\n      filter: { RESPONSIBLE_ID: user.bitrixUserId },\n      select: [\"ID\", \"TITLE\", \"GROUP_ID\", \"STAGE_ID\", \"STATUS\", \"DEADLINE\", \"RESPONSIBLE_ID\", \"RESPONSIBLE_NAME\", \"CHANGED_DATE\", \"CLOSED_DATE\"],\n      start: 0,\n    });\n    const tasks = readTasks(payload).slice(0, 50).map(normalizeTask);\n    userTasks.push({ user, bitrixUserId: user.bitrixUserId, summary: summary(tasks), tasks: tasks.slice(0, 12) });\n  } catch (error) {\n    userTasks.push({ user, bitrixUserId: user.bitrixUserId, error: error.message, summary: summary([]), tasks: [] });\n  }\n}\n\nconst bitrix = { requested: true, configured: true, userTasks };\nlet responseText = input.responseText;\nif (input.command?.name === \"/bitrix\") responseText = formatBitrix(bitrix);\nreturn [{ json: { ...input, bitrix, responseText } }];\n\nasync function bitrixCall(base, method, params) {\n  const allowed = new Set([\"tasks.task.list\", \"tasks.task.get\", \"user.get\", \"user.search\", \"sonet_group.get\", \"socialnetwork.api.workgroup.list\"]);\n  if (!allowed.has(method)) throw new Error(`Bitrix method blocked: ${method}`);\n  const res = await fetch(`${base}/${method}.json`, { method: \"POST\", headers: { \"content-type\": \"application/json\", accept: \"application/json\" }, body: JSON.stringify(params) });\n  const text = await res.text();\n  const payload = text ? JSON.parse(text) : {};\n  if (!res.ok || payload.error) throw new Error(payload.error_description || payload.error || `HTTP ${res.status}`);\n  return payload;\n}\n\nfunction readSecret(name) {\n  const raw = JSON.parse(fs.readFileSync(\"/legacy-data/secrets.json\", \"utf8\"));\n  const item = raw.items?.[name];\n  if (!item) return null;\n  const key = Buffer.from(fs.readFileSync(\"/legacy-data/secrets.key\", \"utf8\").trim(), \"base64\");\n  const decipher = crypto.createDecipheriv(\"aes-256-gcm\", key, Buffer.from(item.iv, \"base64\"));\n  decipher.setAuthTag(Buffer.from(item.tag, \"base64\"));\n  return Buffer.concat([decipher.update(Buffer.from(item.ciphertext, \"base64\")), decipher.final()]).toString(\"utf8\");\n}\n\nfunction readTasks(payload) { return Array.isArray(payload?.result?.tasks) ? payload.result.tasks : Array.isArray(payload?.result) ? payload.result : []; }\nfunction normalizeTask(task) {\n  const status = Number(task.status ?? task.STATUS ?? 0);\n  const deadline = task.deadline ?? task.DEADLINE ?? null;\n  return {\n    id: String(task.id ?? task.ID ?? \"\"),\n    title: String(task.title ?? task.TITLE ?? \"Без названия\"),\n    groupId: nullable(task.groupId ?? task.GROUP_ID),\n    stageId: nullable(task.stageId ?? task.STAGE_ID),\n    status,\n    statusLabel: ({ 1: \"new\", 2: \"pending\", 3: \"in_progress\", 4: \"waiting_control\", 5: \"completed\", 6: \"deferred\" })[status] || \"unknown\",\n    deadline: nullable(deadline),\n    responsibleName: nullable(task.responsibleName ?? task.RESPONSIBLE_NAME),\n    changedAt: nullable(task.changedDate ?? task.CHANGED_DATE),\n    closedAt: nullable(task.closedDate ?? task.CLOSED_DATE),\n    overdue: deadline && status !== 5 && new Date(deadline).getTime() < Date.now(),\n  };\n}\nfunction summary(tasks) {\n  const completed = tasks.filter((task) => task.status === 5).length;\n  const overdue = tasks.filter((task) => task.overdue).length;\n  return { total: tasks.length, open: tasks.length - completed, completed, overdue, efficiencyPercent: tasks.length ? Math.round(completed / tasks.length * 100) : null };\n}\nfunction formatBitrix(bitrix) {\n  const lines = [\"Bitrix: задачи\", \"\"];\n  for (const item of bitrix.userTasks || []) {\n    lines.push(item.user.displayName);\n    if (item.error) lines.push(`Ошибка: ${item.error}`);\n    if (item.note) lines.push(item.note);\n    lines.push(`Всего: ${item.summary.total}`);\n    lines.push(`Открыто: ${item.summary.open}`);\n    lines.push(`Завершено: ${item.summary.completed}`);\n    lines.push(`Просрочено: ${item.summary.overdue}`);\n    if (item.summary.efficiencyPercent !== null) lines.push(`Эффективность: ${item.summary.efficiencyPercent}%`);\n    if (item.tasks?.length) {\n      lines.push(\"Ближайшие задачи:\");\n      for (const task of item.tasks.slice(0, 8)) lines.push(`- ${task.title} (${task.statusLabel}${task.overdue ? \", просрочено\" : \"\"})`);\n    }\n    lines.push(\"\");\n  }\n  return lines.join(\"\\n\").trim();\n}\nfunction nullable(value) { const s = String(value ?? \"\").trim(); return s || null; }\nfunction trimSlash(value) { return String(value || \"\").replace(/\\/+$/u, \"\"); }\nfunction fetch(urlValue, options = {}) {\n  return new Promise((resolve, reject) => {\n    const url = new URL(String(urlValue));\n    const transport = url.protocol === \"http:\" ? http : https;\n    const body = options.body || \"\";\n    const headers = { ...(options.headers || {}), \"content-length\": Buffer.byteLength(body) };\n    const req = transport.request({ protocol: url.protocol, hostname: url.hostname, port: url.port || (url.protocol === \"https:\" ? 443 : 80), path: `${url.pathname}${url.search}`, method: options.method || \"GET\", headers }, (res) => {\n      const chunks = [];\n      res.on(\"data\", (chunk) => chunks.push(Buffer.from(chunk)));\n      res.on(\"end\", () => { const buffer = Buffer.concat(chunks); resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text: async () => buffer.toString(\"utf8\") }); });\n    });\n    req.on(\"error\", reject); req.setTimeout(30000, () => req.destroy(new Error(\"HTTP request timed out\"))); if (body) req.write(body); req.end();\n  });\n}\n"
+      },
+      "id": "bitrix-context",
+      "name": "Bitrix Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        820,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require(\"fs\");\nconst crypto = require(\"crypto\");\nconst http = require(\"http\");\nconst https = require(\"https\");\nconst { URL, URLSearchParams } = require(\"url\");\n\nconst input = $input.first().json;\nif (input.skip || input.responseText || !input.needsGoogle) return [{ json: { ...input, google: { requested: false } } }];\n\nconst accounts = [];\nfor (const user of googleCandidates(input).slice(0, 6)) {\n  const tokens = readGoogleTokens(user.id);\n  if (!tokens?.refreshToken) {\n    accounts.push({ user, connected: false });\n    continue;\n  }\n  try {\n    const accessToken = await getAccessToken(tokens);\n    const calendarList = await readCalendarList(accessToken);\n    const sharedCalendars = await readSharedCalendars({ accessToken, calendars: calendarList.calendars, terms: calendarTerms(input), period: input.period });\n    accounts.push({ user, connected: true, accountEmail: tokens.googleAccountEmail || null, calendarList, sharedCalendars });\n  } catch (error) {\n    accounts.push({ user, connected: true, error: error.message });\n  }\n}\n\nconst google = { requested: true, period: input.period, accounts };\nlet responseText = input.responseText;\nif (input.command?.name === \"/google_status\") responseText = formatGoogleStatus(accounts.find((item) => item.user.id === input.actor?.id));\nreturn [{ json: { ...input, google, responseText } }];\n\nfunction googleCandidates(input) {\n  const result = [];\n  const add = (user) => { if (user && !result.some((item) => item.id === user.id)) result.push(user); };\n  for (const user of input.targetUsers || []) add(user);\n  for (const user of input.accessibleUsers || []) if (readGoogleTokens(user.id)?.refreshToken) add(user);\n  return result;\n}\nfunction calendarTerms(input) {\n  const terms = [input.text || \"\"];\n  for (const user of input.targetUsers || []) terms.push(user.displayName, user.employeeId, `${user.displayName} PM`, `${user.displayName} ПМ`);\n  return [...new Set(terms.filter(Boolean))];\n}\nasync function readCalendarList(accessToken) {\n  const url = new URL(\"https://www.googleapis.com/calendar/v3/users/me/calendarList\");\n  url.searchParams.set(\"maxResults\", \"200\");\n  url.searchParams.set(\"minAccessRole\", \"reader\");\n  url.searchParams.set(\"fields\", \"items(id,summary,summaryOverride,description,primary,accessRole,selected,hidden,timeZone)\");\n  const payload = await fetchJson(url, accessToken);\n  const calendars = (payload.items || []).map((c) => ({ id: c.id, name: c.summaryOverride || c.summary || \"Без названия\", summary: c.summary || null, description: c.description || null, primary: Boolean(c.primary), accessRole: c.accessRole || null }));\n  return { count: calendars.length, calendars };\n}\nasync function readSharedCalendars({ accessToken, calendars, terms, period }) {\n  const normalizedTerms = normalizeTerms(terms);\n  const matches = (calendars || []).filter((c) => !c.primary).map((calendar) => {\n    const haystack = normalize([calendar.name, calendar.summary, calendar.description, calendar.id].filter(Boolean).join(\" \"));\n    return { calendar, matchedTerms: normalizedTerms.filter((term) => haystack.includes(normalize(term))) };\n  }).filter((item) => item.matchedTerms.length).slice(0, 10);\n  const result = [];\n  for (const match of matches) {\n    const events = await readEvents(accessToken, match.calendar.id, period);\n    result.push({ ...match, events, workSummary: summarizeEvents(events.events) });\n  }\n  return { availableCalendars: (calendars || []).length, matchedCalendars: result.length, calendars: result };\n}\nasync function readEvents(accessToken, calendarId, period) {\n  const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);\n  url.searchParams.set(\"timeMin\", period.from); url.searchParams.set(\"timeMax\", period.to); url.searchParams.set(\"singleEvents\", \"true\"); url.searchParams.set(\"orderBy\", \"startTime\"); url.searchParams.set(\"maxResults\", \"60\");\n  url.searchParams.set(\"fields\", \"items(id,summary,status,start,end,htmlLink)\");\n  const payload = await fetchJson(url, accessToken);\n  const events = (payload.items || []).map((e) => ({ id: e.id || null, title: e.summary || \"Без названия\", status: e.status || null, start: e.start?.dateTime || e.start?.date || null, end: e.end?.dateTime || e.end?.date || null, url: e.htmlLink || null }));\n  return { calendarId, count: events.length, events };\n}\nfunction summarizeEvents(events) {\n  let totalMinutes = 0;\n  for (const event of events || []) {\n    const start = new Date(event.start).getTime(); const end = new Date(event.end).getTime();\n    if (Number.isFinite(start) && Number.isFinite(end) && end > start) totalMinutes += Math.round((end - start) / 60000);\n  }\n  return { eventCount: (events || []).length, totalMinutes, totalHours: Math.round(totalMinutes / 6) / 10 };\n}\nasync function getAccessToken(tokens) {\n  if (tokens.accessToken && tokens.expiresAt && new Date(tokens.expiresAt).getTime() - Date.now() > 120000) return tokens.accessToken;\n  const parsed = JSON.parse(readSecret(\"googleOAuthClientJson\"));\n  const client = parsed.web || parsed.installed || parsed;\n  const body = new URLSearchParams({ client_id: client.client_id, client_secret: client.client_secret, refresh_token: tokens.refreshToken, grant_type: \"refresh_token\" });\n  const res = await fetch(\"https://oauth2.googleapis.com/token\", { method: \"POST\", headers: { \"content-type\": \"application/x-www-form-urlencoded\" }, body });\n  const text = await res.text(); const payload = text ? JSON.parse(text) : {};\n  if (!res.ok) throw new Error(payload.error_description || payload.error || `Google HTTP ${res.status}`);\n  return payload.access_token;\n}\nasync function fetchJson(url, accessToken) {\n  const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}`, accept: \"application/json\" } });\n  const text = await res.text(); const payload = text ? JSON.parse(text) : {};\n  if (!res.ok) throw new Error(payload.error?.message || `Google HTTP ${res.status}`);\n  return payload;\n}\nfunction readGoogleTokens(userId) { const raw = readSecret(`googleOAuthTokens:${userId}`); if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } }\nfunction readSecret(name) {\n  const raw = JSON.parse(fs.readFileSync(\"/legacy-data/secrets.json\", \"utf8\")); const item = raw.items?.[name]; if (!item) return null;\n  const key = Buffer.from(fs.readFileSync(\"/legacy-data/secrets.key\", \"utf8\").trim(), \"base64\");\n  const decipher = crypto.createDecipheriv(\"aes-256-gcm\", key, Buffer.from(item.iv, \"base64\")); decipher.setAuthTag(Buffer.from(item.tag, \"base64\"));\n  return Buffer.concat([decipher.update(Buffer.from(item.ciphertext, \"base64\")), decipher.final()]).toString(\"utf8\");\n}\nfunction formatGoogleStatus(account) { if (!account?.connected) return \"Google не подключен. Используй /google_connect.\"; return [`Google подключен`, \"\", `Аккаунт: ${account.accountEmail || \"unknown\"}`, `Календарей видно: ${account.calendarList?.count || 0}`].join(\"\\n\"); }\nfunction normalizeTerms(terms) { return [...new Set((terms || []).map(normalize).filter(Boolean))]; }\nfunction normalize(value) { return String(value || \"\").toLowerCase().replace(/ё/gu, \"е\").replace(/[^a-zа-я0-9]+/giu, \" \").replace(/\\s+/gu, \" \").trim(); }\nfunction fetch(urlValue, options = {}) {\n  return new Promise((resolve, reject) => {\n    const url = new URL(String(urlValue)); const transport = url.protocol === \"http:\" ? http : https; let body = options.body || \"\";\n    if (body instanceof URLSearchParams) body = body.toString(); if (body && typeof body !== \"string\" && !Buffer.isBuffer(body)) body = String(body);\n    const headers = { ...(options.headers || {}) }; if (body) headers[\"content-length\"] = Buffer.byteLength(body);\n    const req = transport.request({ protocol: url.protocol, hostname: url.hostname, port: url.port || (url.protocol === \"https:\" ? 443 : 80), path: `${url.pathname}${url.search}`, method: options.method || \"GET\", headers }, (res) => {\n      const chunks = []; res.on(\"data\", (chunk) => chunks.push(Buffer.from(chunk))); res.on(\"end\", () => { const buffer = Buffer.concat(chunks); resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text: async () => buffer.toString(\"utf8\") }); });\n    });\n    req.on(\"error\", reject); req.setTimeout(30000, () => req.destroy(new Error(\"HTTP request timed out\"))); if (body) req.write(body); req.end();\n  });\n}\n"
+      },
+      "id": "google-context",
+      "name": "Google Calendar Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -140
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require(\"fs\");\n\nconst input = $input.first().json;\nif (input.skip || input.responseText && input.command?.name !== \"/agents\") return [{ json: { ...input, devices: { requested: false } } }];\n\nconst snapshot = readJson(\"/data/device-heartbeats.json\", { devices: {}, totalReceived: 0 });\nconst targetIds = new Set((input.targetUsers || []).map((user) => user.id));\nconst visibleIds = new Set((input.accessibleUsers || []).map((user) => user.id));\nconst devices = Object.values(snapshot.devices || {}).filter((device) => visibleIds.has(device.userId) && (!targetIds.size || targetIds.has(device.userId)));\nconst deviceContext = { requested: true, totalReceived: snapshot.totalReceived || 0, updatedAt: snapshot.updatedAt || null, devices };\n\nlet responseText = input.responseText;\nif (input.command?.name === \"/agents\") responseText = formatDevices(devices);\nreturn [{ json: { ...input, devices: deviceContext, responseText } }];\n\nfunction readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, \"utf8\")); } catch { return fallback; } }\nfunction formatDevices(devices) {\n  if (!devices.length) return \"Агенты устройств пока не выходили на связь в n8n.\";\n  const lines = [\"Агенты устройств\", \"\"];\n  for (const [index, device] of devices.entries()) {\n    lines.push(`${index + 1}. ${device.displayName || device.deviceId}`);\n    lines.push(`User: ${device.userId}`);\n    lines.push(`Host: ${device.hostname || \"n/a\"}`);\n    lines.push(`Platform: ${device.platform || \"n/a\"}`);\n    lines.push(`Last seen: ${device.lastSeenAt || \"n/a\"}`);\n    lines.push(\"\");\n  }\n  return lines.join(\"\\n\").trim();\n}\n"
+      },
+      "id": "device-context",
+      "name": "Device Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require(\"fs\");\nconst crypto = require(\"crypto\");\nconst http = require(\"http\");\nconst https = require(\"https\");\nconst { URL } = require(\"url\");\n\nconst input = $input.first().json;\nif (input.skip || input.responseText) return [{ json: input }];\n\nconst apiKey = readSecret(\"claudeApiKey\");\nconst model = \"claude-sonnet-4-6\";\nif (!apiKey) return [{ json: { ...input, responseText: \"Claude API key не настроен.\" } }];\n\nif (input.command?.name === \"/ai_status\") {\n  try {\n    const check = await callClaude({ apiKey, model, system: \"Answer in Russian with one short sentence.\", user: \"Проверка связи. Ответь: Claude API доступен.\", maxTokens: 80 });\n    return [{ json: { ...input, responseText: [\"Claude API доступен\", \"\", `Model: ${model}`, `Ответ: ${check.text}`].join(\"\\n\"), claudeUsage: check.usage || null } }];\n  } catch (error) {\n    return [{ json: { ...input, responseText: [\"Claude API недоступен\", \"\", `Model: ${model}`, error.message].join(\"\\n\") } }];\n  }\n}\n\nconst context = {\n  now: new Date().toISOString(),\n  timezone: \"Asia/Bishkek\",\n  actor: input.actor,\n  accessPolicy: input.accessPolicy,\n  period: input.period,\n  targets: input.targetUsers,\n  bitrix: input.bitrix,\n  google: input.google,\n  devices: input.devices,\n};\n\ntry {\n  const result = await callClaude({\n    apiKey,\n    model,\n    system: [\n      \"Ты корпоративный AI-ассистент Starlab Agent для Telegram.\",\n      \"Отвечай на русском языке, красиво, понятно и без технического мусора.\",\n      \"Не показывай JSON, токены, webhook-и, внутренние ошибки или debug-контекст.\",\n      \"Структура: короткий заголовок, Коротко, Детали, Что проверить дальше если нужно.\",\n      \"Для Bitrix сначала используй userTasks. Для календарей сначала используй sharedCalendars из Google 'Другие календари'.\",\n      \"Если данных нет, честно скажи каких именно данных не хватает.\",\n    ].join(\" \"),\n    user: [`Вопрос: ${input.text}`, \"\", \"Контекст:\", JSON.stringify(context, null, 2)].join(\"\\n\"),\n    maxTokens: 1800,\n  });\n  return [{ json: { ...input, responseText: clean(result.text), claudeUsage: result.usage || null } }];\n} catch (error) {\n  return [{ json: { ...input, responseText: [\"Claude API сейчас не ответил.\", \"\", error.message, \"\", fallback(context)].join(\"\\n\") } }];\n}\n\nasync function callClaude({ apiKey, model, system, user, maxTokens }) {\n  const res = await fetch(\"https://api.anthropic.com/v1/messages\", {\n    method: \"POST\",\n    headers: { \"content-type\": \"application/json\", accept: \"application/json\", \"anthropic-version\": \"2023-06-01\", \"x-api-key\": apiKey },\n    body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0.2, system, messages: [{ role: \"user\", content: user }] }),\n  });\n  const text = await res.text(); const payload = text ? JSON.parse(text) : {};\n  if (!res.ok) throw new Error(payload.error?.message || `Claude HTTP ${res.status}`);\n  return { text: (payload.content || []).map((item) => item.text || \"\").join(\"\\n\").trim(), usage: payload.usage || null };\n}\nfunction readSecret(name) {\n  const raw = JSON.parse(fs.readFileSync(\"/legacy-data/secrets.json\", \"utf8\")); const item = raw.items?.[name]; if (!item) return null;\n  const key = Buffer.from(fs.readFileSync(\"/legacy-data/secrets.key\", \"utf8\").trim(), \"base64\");\n  const decipher = crypto.createDecipheriv(\"aes-256-gcm\", key, Buffer.from(item.iv, \"base64\")); decipher.setAuthTag(Buffer.from(item.tag, \"base64\"));\n  return Buffer.concat([decipher.update(Buffer.from(item.ciphertext, \"base64\")), decipher.final()]).toString(\"utf8\");\n}\nfunction fallback(context) {\n  const lines = [];\n  for (const item of context.bitrix?.userTasks || []) lines.push(`${item.user.displayName}: задач ${item.summary.total}, открыто ${item.summary.open}, завершено ${item.summary.completed}.`);\n  for (const account of context.google?.accounts || []) lines.push(`${account.user.displayName}: Google ${account.connected ? \"подключен\" : \"не подключен\"}, календарей ${account.calendarList?.count || 0}.`);\n  return lines.join(\"\\n\") || \"Контекст собран, но данных для краткой сводки мало.\";\n}\nfunction clean(text) { return String(text || \"\").replace(/\\r\\n/g, \"\\n\").replace(/\\n{4,}/g, \"\\n\\n\\n\").trim(); }\nfunction fetch(urlValue, options = {}) {\n  return new Promise((resolve, reject) => {\n    const url = new URL(String(urlValue)); const transport = url.protocol === \"http:\" ? http : https; const body = options.body || \"\";\n    const headers = { ...(options.headers || {}), \"content-length\": Buffer.byteLength(body) };\n    const req = transport.request({ protocol: url.protocol, hostname: url.hostname, port: url.port || (url.protocol === \"https:\" ? 443 : 80), path: `${url.pathname}${url.search}`, method: options.method || \"GET\", headers }, (res) => {\n      const chunks = []; res.on(\"data\", (chunk) => chunks.push(Buffer.from(chunk))); res.on(\"end\", () => { const buffer = Buffer.concat(chunks); resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text: async () => buffer.toString(\"utf8\") }); });\n    });\n    req.on(\"error\", reject); req.setTimeout(30000, () => req.destroy(new Error(\"HTTP request timed out\"))); if (body) req.write(body); req.end();\n  });\n}\n"
+      },
+      "id": "claude-response",
+      "name": "Claude Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const fs = require(\"fs\");\nconst crypto = require(\"crypto\");\nconst http = require(\"http\");\nconst https = require(\"https\");\nconst { URL } = require(\"url\");\n\nconst input = $input.first().json;\nif (input.skip || !input.chatId) return [{ json: { ok: true, skipped: true } }];\n\nconst token = readSecret(\"telegramBotToken\");\nconst text = normalize(input.responseText || \"Готово.\");\nconst chunks = split(text, 3900);\nfor (const chunk of chunks) {\n  await telegram(\"sendMessage\", { chat_id: input.chatId, text: chunk, disable_web_page_preview: true }, token);\n}\n\nreturn [{ json: { ok: true, sent: chunks.length, chatId: input.chatId } }];\n\nasync function telegram(method, payload, token) {\n  if (!token) throw new Error(\"telegramBotToken is not configured\");\n  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: \"POST\", headers: { \"content-type\": \"application/json\" }, body: JSON.stringify(payload) });\n  const text = await res.text(); const data = text ? JSON.parse(text) : {};\n  if (!res.ok || data.ok === false) throw new Error(data.description || `Telegram ${method} HTTP ${res.status}`);\n  return data.result;\n}\nfunction readSecret(name) {\n  const raw = JSON.parse(fs.readFileSync(\"/legacy-data/secrets.json\", \"utf8\")); const item = raw.items?.[name]; if (!item) return null;\n  const key = Buffer.from(fs.readFileSync(\"/legacy-data/secrets.key\", \"utf8\").trim(), \"base64\");\n  const decipher = crypto.createDecipheriv(\"aes-256-gcm\", key, Buffer.from(item.iv, \"base64\")); decipher.setAuthTag(Buffer.from(item.tag, \"base64\"));\n  return Buffer.concat([decipher.update(Buffer.from(item.ciphertext, \"base64\")), decipher.final()]).toString(\"utf8\");\n}\nfunction normalize(text) { return String(text || \"\").replace(/\\r\\n/g, \"\\n\").replace(/\\n{4,}/g, \"\\n\\n\\n\").replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]/g, \"\").trim(); }\nfunction split(text, limit) {\n  const chunks = []; let current = \"\";\n  for (const line of String(text).split(\"\\n\")) {\n    if ((current + \"\\n\" + line).length > limit) { if (current.trim()) chunks.push(current.trim()); current = line; }\n    else current = current ? `${current}\\n${line}` : line;\n  }\n  if (current.trim()) chunks.push(current.trim());\n  return chunks.length ? chunks : [\"Готово.\"];\n}\nfunction fetch(urlValue, options = {}) {\n  return new Promise((resolve, reject) => {\n    const url = new URL(String(urlValue)); const transport = url.protocol === \"http:\" ? http : https; const body = options.body || \"\";\n    const headers = { ...(options.headers || {}), \"content-length\": Buffer.byteLength(body) };\n    const req = transport.request({ protocol: url.protocol, hostname: url.hostname, port: url.port || (url.protocol === \"https:\" ? 443 : 80), path: `${url.pathname}${url.search}`, method: options.method || \"GET\", headers }, (res) => {\n      const chunks = []; res.on(\"data\", (chunk) => chunks.push(Buffer.from(chunk))); res.on(\"end\", () => { const buffer = Buffer.concat(chunks); resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, text: async () => buffer.toString(\"utf8\") }); });\n    });\n    req.on(\"error\", reject); req.setTimeout(30000, () => req.destroy(new Error(\"HTTP request timed out\"))); if (body) req.write(body); req.end();\n  });\n}\n"
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Telegram Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Telegram Update": {
+      "main": [
+        [
+          {
+            "node": "Access Scope & Commands",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Access Scope & Commands": {
+      "main": [
+        [
+          {
+            "node": "Bitrix Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bitrix Context": {
+      "main": [
+        [
+          {
+            "node": "Google Calendar Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar Context": {
+      "main": [
+        [
+          {
+            "node": "Device Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Device Context": {
+      "main": [
+        [
+          {
+            "node": "Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Response": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2026-06-08T10:14:34.769Z",
+  "versionId": "starlab-telegram-modular-1",
+  "active": true
+}

@@ -29,7 +29,7 @@ export async function sendDueTokenUsageReports({
       const text = formatTokenUsageSummary(summary, { label: period.label });
       await telegram.sendMessage({
         chatId: schedule.recipientTelegramId,
-        text: escapeHtml(text),
+        text,
       });
       schedule[period.key].lastSentAt = now.toISOString();
       reports.push({ key: period.key, recipientTelegramId: schedule.recipientTelegramId });
@@ -54,14 +54,7 @@ export async function sendTokenUsageReportNow({
   const summary = buildTokenUsageSummary(state, period);
   await telegram.sendMessage({
     chatId,
-    text: escapeHtml(formatTokenUsageSummary(summary, { label: period.label })),
+    text: formatTokenUsageSummary(summary, { label: period.label }),
   });
   return summary;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }

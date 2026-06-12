@@ -18,3 +18,8 @@ openclaw/
 **/runtime-config.json
 **/*.log
 
+# Large generated desktop installers are deployed to the server/download storage,
+# not committed into Git history.
+control-plane/public/downloads/*.exe
+control-plane/public/downloads/*.dmg
+control-plane/public/downloads/*.deb
