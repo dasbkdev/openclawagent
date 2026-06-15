@@ -94,6 +94,15 @@ export class MockPlatrumClient {
     };
   }
 
+  async getAllTasks() {
+    return {
+      source: this.source,
+      configured: this.configured,
+      note: "Platrum is not configured",
+      tasks: [],
+    };
+  }
+
   async getDailyReports() {
     return {
       source: this.source,
@@ -226,6 +235,21 @@ export class HttpPlatrumClient {
       platrumUserId: platrumUser.id,
       platrumUsername: platrumUser.username ?? null,
       tasks: tasks.slice(0, normalizeLimit(limit)).map(normalizePlatrumTask),
+    };
+  }
+
+  /**
+   * All tasks across every board the account can see, including personal
+   * kanban boards that have no project mapping (board_is_personal=true,
+   * project_id=null). These are invisible to getProjectTasks, yet hold the
+   * bulk of real work, so this is the source of truth for "all tasks".
+   */
+  async getAllTasks({ limit = 200 } = {}) {
+    const tasks = asArray(await this.requestJson("/api/v1/tasks/team/"));
+    return {
+      source: this.source,
+      configured: this.configured,
+      tasks: tasks.slice(0, normalizeLimit(limit, 500)).map(normalizePlatrumTask),
     };
   }
 
@@ -411,6 +435,9 @@ export function normalizePlatrumTask(task) {
     description: stringOrNull(task.description),
     projectId: normalizeId(task.project_id ?? task.board),
     projectName: stringOrNull(task.project_name ?? task.board_name),
+    boardId: normalizeId(task.board),
+    boardName: stringOrNull(task.board_name),
+    boardIsPersonal: Boolean(task.board_is_personal),
     assigneeId: normalizeId(task.assignee),
     assigneeUsername: stringOrNull(task.assignee_username),
     reporterId: normalizeId(task.reporter),

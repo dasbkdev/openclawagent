@@ -801,6 +801,38 @@ async function readPlatrumContext({ projects, targetUsers, period, platrumClient
     }
   }
 
+  // Board-centric view of EVERY task across all kanban boards, including
+  // personal boards (board_is_personal=true) that have no project mapping and
+  // are therefore invisible to projectTasks. This is the full task picture.
+  let boardTasks = [];
+  if (platrumClient.getAllTasks) {
+    try {
+      const all = await platrumClient.getAllTasks({ limit: 300 });
+      const tasks = (all.tasks || []).map((task) => stripRawTask({ ...task, overdue: Boolean(task.overdue) }));
+      const groups = new Map();
+      for (const task of tasks) {
+        const key = task.boardId ?? "none";
+        if (!groups.has(key)) {
+          groups.set(key, {
+            boardId: task.boardId ?? null,
+            boardName: task.boardName ?? null,
+            boardIsPersonal: Boolean(task.boardIsPersonal),
+            projectId: task.projectId ?? null,
+            tasks: [],
+          });
+        }
+        groups.get(key).tasks.push(task);
+      }
+      boardTasks = [...groups.values()].map((group) => ({
+        ...group,
+        summary: summarizePlatrumTasks(group.tasks),
+        tasks: group.tasks.slice(0, MAX_TASKS_PER_PROJECT),
+      }));
+    } catch (error) {
+      boardTasks = [{ error: error instanceof Error ? error.message : String(error), tasks: [] }];
+    }
+  }
+
   let dailyReports = null;
   let teamMetrics = null;
   try {
@@ -831,6 +863,7 @@ async function readPlatrumContext({ projects, targetUsers, period, platrumClient
     period,
     userTasks,
     projectTasks,
+    boardTasks,
     dailyReports,
     teamMetrics,
   };
@@ -1181,6 +1214,7 @@ function buildSystemPrompt() {
     "ВАЖНО про атрибуцию задач: platrum.projectTasks содержит задачи ВСЕХ участников проекта, у каждой задачи есть исполнитель (assigneeUsername/assigneeId).",
     "Личные задачи, личная статистика и эффективность сотрудника считаются ТОЛЬКО по задачам, где этот сотрудник является исполнителем: platrum.userTasks либо задачи проекта с совпадающим assignee (сравни с platrumUserId/platrumUsername из userTasks).",
     "НИКОГДА не приписывай сотруднику задачи с другим исполнителем и не считай из них его эффективность. Если у сотрудника ноль личных задач, прямо скажи об этом; задачи проекта с другими исполнителями упоминай отдельно, называя исполнителя.",
+    "platrum.boardTasks — это ВСЕ задачи со ВСЕХ канбан-досок, включая личные доски сотрудников (boardIsPersonal=true), у которых нет привязки к проекту и которых НЕТ в projectTasks. Для вопросов «покажи все задачи», «что в работе», «задачи на доске X», «сколько задач всего» опирайся на boardTasks — это полная картина. Каждая группа = одна доска (boardName, boardIsPersonal), внутри tasks с исполнителем, колонкой (columnName) и статусом.",
     "Эффективность по задачам считай как completed / total * 100 только из задач, где сотрудник — исполнитель.",
     "Если в контексте есть context.workHistory — это полная хронология работы сотрудника за период из timeline (диалоги, действия агента, задачи созданы/назначены/завершены, отчёты). Для вопросов вида «что делал(а) за месяц/неделю», «история», «чем занимался» опирайся ПРЕЖДЕ ВСЕГО на workHistory: перечисли реальные события по дням/категориям, сколько задач завершено/поставлено, с кем работал. Не выдумывай — бери факты из workHistory.users[].days и totals.",
     "Если в контексте есть context.webResearch — это свежие данные из интернета по вопросу (summary + sources). Для вопросов про новости, цены/курсы, погоду, актуальные события и любые запросы «найди в интернете» опирайся на context.webResearch.summary и кратко укажи источники (домены) из context.webResearch.sources. Не выдумывай факты поверх найденного.",

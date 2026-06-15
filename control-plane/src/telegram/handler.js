@@ -370,7 +370,7 @@ export async function handleTelegramMessage({
           telegram,
           chatId,
           telegramUserId,
-          periodName: command.args[0] || "day",
+          periodName: command.args[0] || "all",
           now,
         });
         return;
@@ -1208,7 +1208,10 @@ async function sendDailyReport({ store, telegram, chatId, telegramUserId, kickid
 
 async function sendTokenUsageReport({ store, telegram, chatId, telegramUserId, periodName, now }) {
   const recipientTelegramId = process.env.TOKEN_USAGE_REPORT_TELEGRAM_ID || "984834133";
-  if (String(telegramUserId) !== String(recipientTelegramId)) {
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  const isOwner = actor?.role === "OWNER";
+  if (!isOwner && String(telegramUserId) !== String(recipientTelegramId)) {
     throw unauthorized("Отчеты по токенам доступны только владельцу");
   }
   await sendTokenUsageReportNow({ store, telegram, chatId, periodName, now });

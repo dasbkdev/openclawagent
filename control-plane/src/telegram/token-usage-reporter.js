@@ -50,11 +50,22 @@ export async function sendTokenUsageReportNow({
 }) {
   const state = await store.load();
   ensureTokenUsageState(state, process.env, now);
-  const period = resolveTokenUsagePeriod(periodName, now);
-  const summary = buildTokenUsageSummary(state, period);
+  // "all" (the default when /tokens is called with no argument) renders day,
+  // week and month in one message; a single period renders just that one.
+  const periodNames = String(periodName || "all").toLowerCase() === "all"
+    ? REPORT_PERIODS
+    : [periodName];
+  const parts = [];
+  let lastSummary = null;
+  for (const name of periodNames) {
+    const period = resolveTokenUsagePeriod(name, now);
+    const summary = buildTokenUsageSummary(state, period);
+    parts.push(formatTokenUsageSummary(summary, { label: period.label }));
+    lastSummary = summary;
+  }
   await telegram.sendMessage({
     chatId,
-    text: formatTokenUsageSummary(summary, { label: period.label }),
+    text: parts.join("\n\n———\n\n"),
   });
-  return summary;
+  return lastSummary;
 }
