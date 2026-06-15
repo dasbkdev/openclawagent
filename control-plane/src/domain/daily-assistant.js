@@ -585,6 +585,10 @@ function findDailyPlan(state, userId, date) {
   return state.dailyWorkPlans?.find((plan) => plan.userId === userId && plan.date === date);
 }
 
+export function findTodayPlanForUser(state, userId, now = new Date()) {
+  return findDailyPlan(state, userId, getLocalDateKey(now)) || null;
+}
+
 function findDailyMetrics(state, userId, date) {
   return state.workMetricsDaily?.find((metrics) => metrics.userId === userId && metrics.date === date);
 }

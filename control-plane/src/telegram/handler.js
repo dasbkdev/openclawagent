@@ -14,9 +14,15 @@ import {
   formatManagerReport,
   formatRemainingDoneResult,
   getCommandRemainder,
+  findTodayPlanForUser,
   markDailyPlanItemDone,
   markRemainingDailyPlanItemsDone,
 } from "../domain/daily-assistant.js";
+import {
+  parseNaturalPlanIntent,
+  parseNaturalDoneIntent,
+  matchPlanItemByPhrase,
+} from "../domain/natural-plan-actions.js";
 import {
   createDeviceCommand,
   listVisibleDeviceAgents,
@@ -387,6 +393,13 @@ export async function handleTelegramMessage({
 
       default:
         if (command.raw && !command.raw.startsWith("/")) {
+          const handledPlanCreate = await maybeCreateNaturalPlan({
+            store, telegram, chatId, telegramUserId, text: command.raw, now,
+          });
+          if (handledPlanCreate) {
+            return;
+          }
+
           const handledDailyUpdate = await maybeMarkRemainingDailyDone({
             store,
             telegram,
@@ -396,6 +409,13 @@ export async function handleTelegramMessage({
             now,
           });
           if (handledDailyUpdate) {
+            return;
+          }
+
+          const handledNaturalDone = await maybeMarkNaturalDone({
+            store, telegram, chatId, telegramUserId, text: command.raw, now,
+          });
+          if (handledNaturalDone) {
             return;
           }
 
@@ -981,12 +1001,95 @@ async function sendPlatrumReport({ store, telegram, chatId, telegramUserId, plat
 }
 
 async function saveDailyPlan({ store, telegram, chatId, telegramUserId, text, now }) {
+  // /plan with no text: show the current plan and a friendly hint instead of
+  // erroring.
+  if (!String(text || "").trim()) {
+    const current = await store.update((state) => {
+      const actor = resolveActorByTelegramId(state, telegramUserId);
+      return findTodayPlanForUser(state, actor.id, now);
+    });
+    if (current && current.items?.length) {
+      await telegram.sendMessage({
+        chatId,
+        text: [formatDailyPlan(current), "", "Чтобы задать новый план, просто напиши его:", code("План на сегодня"), code("1. ..."), code("2. ...")].join("\n"),
+      });
+    } else {
+      await telegram.sendMessage({
+        chatId,
+        text: [
+          title("План дня"),
+          "Напиши план списком — команда не нужна. Например:",
+          "",
+          code("План на сегодня"),
+          code("1. Провести собрание"),
+          code("2. Созвон с Жакшылыком"),
+          code("3. Подтвердить график сотрудников"),
+          "",
+          "Когда что-то сделаешь — просто напиши «созвон провёл» или «всё сделал», и я отмечу.",
+        ].join("\n"),
+      });
+    }
+    return;
+  }
+
   const plan = await store.update((state) => {
     const actor = resolveActorByTelegramId(state, telegramUserId);
     return createOrUpdateDailyPlan(state, { actor, text, now });
   });
 
   await telegram.sendMessage({ chatId, text: formatDailyPlan(plan) });
+}
+
+async function maybeCreateNaturalPlan({ store, telegram, chatId, telegramUserId, text, now }) {
+  const intent = parseNaturalPlanIntent(text);
+  if (!intent) {
+    return false;
+  }
+  const plan = await store.update((state) => {
+    const actor = resolveActorByTelegramId(state, telegramUserId);
+    const created = createOrUpdateDailyPlan(state, { actor, text: intent.items.join("\n"), now });
+    recordAssistantMemoryEvent(state, {
+      userId: actor.id, channel: "telegram", role: "user",
+      kind: "daily_plan_natural_create", text,
+      target: { userId: actor.id, date: created.date }, now,
+    });
+    return created;
+  });
+  await telegram.sendMessage({
+    chatId,
+    text: [title("План на сегодня принят"), formatDailyPlan(plan), "", "Когда выполнишь пункт — напиши, например, «собрание провёл», и я отмечу его."].join("\n"),
+  });
+  return true;
+}
+
+async function maybeMarkNaturalDone({ store, telegram, chatId, telegramUserId, text, now }) {
+  const intent = parseNaturalDoneIntent(text);
+  if (!intent) {
+    return false;
+  }
+  const result = await store.update((state) => {
+    const actor = resolveActorByTelegramId(state, telegramUserId);
+    const plan = findTodayPlanForUser(state, actor.id, now);
+    if (!plan || !plan.items?.length) {
+      return { handled: false };
+    }
+    const match = matchPlanItemByPhrase(plan, intent.reference);
+    if (!match) {
+      return { handled: false };
+    }
+    const done = markDailyPlanItemDone(state, { actor, selector: String(match.index), now });
+    recordAssistantMemoryEvent(state, {
+      userId: actor.id, channel: "telegram", role: "user",
+      kind: "daily_plan_natural_done", text,
+      target: { userId: actor.id, date: done.plan.date, itemId: done.item.id }, now,
+    });
+    return { handled: true, result: done };
+  });
+  if (!result.handled) {
+    return false;
+  }
+  await telegram.sendMessage({ chatId, text: formatDoneResult(result.result) });
+  return true;
 }
 
 async function sendDailyProgress({ store, telegram, chatId, telegramUserId, kickidlerClient, bitrixClient, platrumClient, target, now }) {

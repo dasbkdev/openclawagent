@@ -8661,3 +8661,38 @@ common ones.
   server /downloads, bump releases.json. Until then, the CURRENT agent already
   opens: dictionary apps (server-side resolver, ~20 common apps) + anything on
   PATH / App Paths registry. Display-name-only and Store apps need the update.
+
+## 2026-06-15 - Natural-language daily plan: create & complete without commands
+
+### User request
+Employees shouldn't need slash commands. They should be able to write a plan
+as free text ("План на сегодня\n1. ...\n2. ...") and mark items done naturally
+("переговоры на 17:00 провели", "я выполнил отчёт"). Also /plan with no text
+must not error.
+
+### Implemented
+- New `src/domain/natural-plan-actions.js` (pure parsing/matching):
+  - parseNaturalPlanIntent: detects a plan header ("план на сегодня", "мой
+    план", "todo", "задачи на день") followed by a list; ignores plan
+    QUESTIONS ("какой план?").
+  - parseNaturalDoneIntent: detects completion verbs (выполнил/сделал/провёл/
+    закрыл/готово…); defers "всё/остальные" to the existing remaining-done path.
+  - matchPlanItemByPhrase: fuzzy-matches a phrase to a plan item by keyword
+    overlap (stopwords + done-verbs stripped) and time tokens ("17:00" is a
+    strong signal).
+- `daily-assistant.js`: exported findTodayPlanForUser.
+- `telegram/handler.js` free-form path now, before the assistant:
+  - maybeCreateNaturalPlan → createOrUpdateDailyPlan from natural text.
+  - maybeMarkNaturalDone → marks the matching plan item done (specific),
+    after the existing "всё сделал" remaining-done handler.
+- `/plan` with no text no longer errors: shows the current plan (if any) plus
+  a friendly example of writing a plan as free text.
+
+### Order of free-form intent handling
+natural plan create → remaining-done ("всё") → specific natural done →
+natural device command → assistant. Non-matches fall through safely (e.g.
+"что я сделал за месяц" → no plan match → work-history assistant).
+
+### Verification
+- Local + server npm test: 225 passed, 0 failed (+ natural-plan tests).
+- Services active, logs clean.
