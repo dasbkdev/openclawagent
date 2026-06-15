@@ -48,6 +48,10 @@ let nextReportersRunAt = 0;
 // Obsidian vault export feeds the web graph showcase; hourly is plenty.
 const VAULT_EXPORT_INTERVAL_MS = Number(process.env.VAULT_EXPORT_INTERVAL_MS || 3600000);
 let nextVaultExportAt = 0;
+// Bounded concurrency for message processing — slow messages no longer block
+// polling or other users.
+const MAX_CONCURRENT_UPDATES = Number(process.env.BOT_MAX_CONCURRENT_UPDATES || 6);
+const inFlight = new Set();
 
 console.log("telegram bot polling started");
 
@@ -125,7 +129,11 @@ while (true) {
       // Advance the offset before processing so a "poison" update can
       // never cause an infinite reprocessing loop.
       offset = update.update_id + 1;
-      await processTelegramUpdate({
+      // Process updates CONCURRENTLY (bounded) so one slow message — web
+      // search (~1 min), a /task run (minutes), a heavy report — does not
+      // block polling or other users. The loop keeps fetching updates while
+      // long operations run in the background.
+      const job = processTelegramUpdate({
         update,
         store,
         telegram,
@@ -137,7 +145,14 @@ while (true) {
           claudeClient: createClaudeClientFromEnv(),
           voiceService: createVoiceServiceFromEnv(),
         }),
-      });
+      })
+        .catch((error) => console.error(`update ${update.update_id} failed:`, error instanceof Error ? error.message : error))
+        .finally(() => inFlight.delete(job));
+      inFlight.add(job);
+      if (inFlight.size >= MAX_CONCURRENT_UPDATES) {
+        // Backpressure: wait for the fastest in-flight job before claiming more.
+        await Promise.race(inFlight);
+      }
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);

@@ -209,14 +209,16 @@ export async function answerCompanyAssistant({
   });
 
   if (completion.configured !== false) {
-    await distillAssistantMemory({
+    // Memory distillation (a Haiku call) must NOT delay the answer — run it
+    // in the background. It writes to the store via its own store.update.
+    void distillAssistantMemory({
       store,
       claudeClient,
       actor,
       question: trimmedQuestion,
       answer: rendered.plainText,
       now,
-    });
+    }).catch((error) => console.error("distill failed:", error instanceof Error ? error.message : error));
   }
 
   return { html: rendered.html, plainText: rendered.plainText };
