@@ -35,6 +35,8 @@ const DEVICE_CAPABILITIES = [
   "keyboard_type",
   "hotkey",
   "mouse_click",
+  "minimize_window",
+  "minimize_all",
 ];
 
 const WINDOWS_APP_ALIASES = {
@@ -470,6 +472,10 @@ async function executeDeviceCommand(command) {
       return succeed(await typeText(args));
     case "hotkey":
       return succeed(await pressHotkey(args));
+    case "minimize_window":
+      return succeed(await minimizeActiveWindow());
+    case "minimize_all":
+      return succeed(await minimizeAllWindows());
     case "mouse_click":
       return succeed(await clickMouse(args));
     case "ocr_screen":
@@ -565,6 +571,23 @@ async function openUrl(args) {
   }
   await shell.openExternal(url);
   return { opened: url };
+}
+
+async function minimizeActiveWindow() {
+  // Win32 ShowWindow(SW_MINIMIZE=6) on the foreground window.
+  await runPowerShell(`
+Add-Type -Namespace W -Name U -MemberDefinition '
+[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int n);'
+[W.U]::ShowWindow([W.U]::GetForegroundWindow(), 6) | Out-Null
+`);
+  return { minimized: "active" };
+}
+
+async function minimizeAllWindows() {
+  // Shell.Application MinimizeAll == Win+M.
+  await runPowerShell("(New-Object -ComObject Shell.Application).MinimizeAll()");
+  return { minimized: "all" };
 }
 
 async function playYoutube(args) {

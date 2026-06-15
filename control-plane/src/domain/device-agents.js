@@ -41,6 +41,8 @@ export const DEVICE_ACTION_TYPES = Object.freeze([
   "media_control",
   "set_volume",
   "system_info",
+  "minimize_window",
+  "minimize_all",
 ]);
 
 // Actions that can mutate or exfiltrate the user's machine. The device-side

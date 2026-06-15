@@ -61,6 +61,8 @@ const PLATFORM_ACTIONS = Object.freeze({
     "hotkey",
     "media_control",
     "set_volume",
+    "minimize_window",
+    "minimize_all",
   ],
   darwin: [
     ...COMMON_ACTIONS,
@@ -74,6 +76,8 @@ const PLATFORM_ACTIONS = Object.freeze({
     "hotkey",
     "media_control",
     "set_volume",
+    "minimize_window",
+    "minimize_all",
   ],
   // Linux is best-effort: file ops + run_script + open_url are reliable; the
   // GUI bits need optional tools (xdotool/wmctrl/scrot/notify-send) which may
@@ -245,6 +249,10 @@ export function buildWindowsCommand(type, args = {}) {
       return `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escapePowerShellLiteral(
         mediaControlToSendKeys(args.action || args.command),
       )}')`;
+    case "minimize_window":
+      return "Add-Type -Namespace W -Name U -MemberDefinition '[DllImport(\"user32.dll\")] public static extern System.IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern bool ShowWindow(System.IntPtr h, int n);'; [W.U]::ShowWindow([W.U]::GetForegroundWindow(), 6) | Out-Null; Write-Output 'minimized'";
+    case "minimize_all":
+      return "(New-Object -ComObject Shell.Application).MinimizeAll(); Write-Output 'minimized-all'";
     case "set_volume":
       return buildWindowsVolumeCommand(args);
     case "notify":

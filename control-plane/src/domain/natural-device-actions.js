@@ -14,7 +14,38 @@ const APP_ALIASES = Object.freeze([
 ]);
 
 const OPEN_VERBS = /(открой|открыть|запусти|запустить|включи|перейди|зайди|open|launch|start|play)/iu;
-const CLOSE_VERBS = /(закрой|закрыть|выключи|close|quit)/iu;
+const CLOSE_VERBS = /(закрой|закрыть|выключи|заверши|кильни|убей|close|quit|kill)/iu;
+const TAB_WORDS = /(вкладк|tab\b)/iu;
+const MINIMIZE_WORDS = /(сверн|свора|минимиз|minimi[sz]e)/iu;
+// Cyrillic \b is unreliable in JS regex; match "все/всё/all" with explicit
+// boundaries instead.
+const ALL_WINDOWS_WORDS = /(^|\s)(все|всё|all|everything)(\s|$)|все\s+окн|все\s+прилож/iu;
+const SITE_WORDS = /(сайт|site|website|страниц|webpage)/iu;
+const KNOWN_SITES = Object.freeze([
+  { match: /(facebook|фейсбук|фэйсбук)/iu, url: "https://www.facebook.com" },
+  { match: /(instagram|инстаграм|инсту|инста)/iu, url: "https://www.instagram.com" },
+  { match: /(\bvk\b|вконтакте|вк\b)/iu, url: "https://vk.com" },
+  { match: /(gmail|гмайл|гмаил|джимейл|почт)/iu, url: "https://mail.google.com" },
+  { match: /(google|гугл)(?!\s*chrome|\s*хром)/iu, url: "https://www.google.com" },
+  { match: /(twitter|твиттер|\bx\.com\b|\bикс\b)/iu, url: "https://x.com" },
+  { match: /(github|гитхаб|гит\b)/iu, url: "https://github.com" },
+  { match: /(chatgpt|чатгпт|чат\s*гпт|gpt\b)/iu, url: "https://chat.openai.com" },
+  { match: /(wikipedia|википеди)/iu, url: "https://ru.wikipedia.org" },
+  { match: /(linkedin|линкедин)/iu, url: "https://www.linkedin.com" },
+  { match: /(whatsapp|вотсап|ватсап|whats\s*app)/iu, url: "https://web.whatsapp.com" },
+  { match: /(netflix|нетфликс)/iu, url: "https://www.netflix.com" },
+  { match: /(avito|авито)/iu, url: "https://www.avito.ru" },
+  { match: /(yandex|яндекс)/iu, url: "https://ya.ru" },
+  { match: /(telegram\s*web|телеграм\s*веб)/iu, url: "https://web.telegram.org" },
+]);
+const TLD = "com|ru|org|net|io|kg|kz|uz|info|biz|co|app|dev|me|tv|ai|gov|edu|uk|de|fr|pp\\.ua|ua";
+const BARE_DOMAIN = new RegExp(`\\b([a-z0-9-]{2,}\\.(?:${TLD}))(\\/[^\\s]*)?\\b`, "iu");
+const STOP_APP_WORDS = new Set([
+  "приложение", "приложения", "программу", "программа", "окно", "окна", "сайт",
+  "на", "в", "во", "мой", "моем", "моём", "компьютере", "компе", "пк", "это",
+  "пожалуйста", "сейчас", "app", "application", "the", "please", "now", "window",
+  ...["открой","открыть","запусти","запустить","включи","перейди","зайди","закрой","закрыть","выключи","заверши","кильни","убей","open","launch","start","close","quit","kill"],
+]);
 const SCREENSHOT_WORDS = /(скриншот|скрин|screenshot|screen shot)/iu;
 const ACTIVE_WINDOW_WORDS = /(активн(?:ое|ый|ого)?\s+окн|текущее\s+окн|какое\s+окн|active\s+window|frontmost)/iu;
 const MUSIC_WORDS = /(песн|музык|трек|music|song)/iu;
@@ -49,6 +80,23 @@ export function parseNaturalDeviceAction(text) {
     };
   }
 
+  // Close a browser tab (Ctrl+W) — must win over close_app for "закрой вкладку".
+  if (hasCloseVerb && TAB_WORDS.test(normalized)) {
+    return {
+      type: "hotkey",
+      args: { keys: ["ctrl", "w"] },
+      humanAction: "закрыть вкладку в браузере",
+    };
+  }
+
+  // Minimize windows.
+  if (MINIMIZE_WORDS.test(normalized)) {
+    if (ALL_WINDOWS_WORDS.test(normalized)) {
+      return { type: "minimize_all", args: {}, humanAction: "свернуть все окна" };
+    }
+    return { type: "minimize_window", args: {}, humanAction: "свернуть активное окно" };
+  }
+
   const explicitUrl = extractUrl(raw);
   if (explicitUrl && hasOpenVerb) {
     return {
@@ -80,7 +128,22 @@ export function parseNaturalDeviceAction(text) {
     };
   }
 
-  const appName = resolveAppName(normalized);
+  // Open any website: bare domain ("открой example.com"), or a known site by
+  // name ("открой фейсбук"), or "открой сайт X".
+  if (hasOpenVerb && !hasCloseVerb) {
+    const site = resolveWebsiteUrl(raw, normalized);
+    if (site) {
+      return {
+        type: "open_url",
+        args: { url: site },
+        humanAction: `открыть сайт ${site}`,
+      };
+    }
+  }
+
+  // Open/close an app: known alias first, then a free-form app name after the
+  // verb so ANY installed app works ("закрой Spotify", "открой Postman").
+  const appName = resolveAppName(normalized) || extractFreeAppName(raw, { hasOpenVerb, hasCloseVerb });
   if (appName && (hasOpenVerb || hasCloseVerb)) {
     return {
       type: hasCloseVerb ? "close_app" : "open_app",
@@ -90,6 +153,59 @@ export function parseNaturalDeviceAction(text) {
   }
 
   return null;
+}
+
+function resolveWebsiteUrl(raw, normalized) {
+  const bare = String(raw).match(BARE_DOMAIN);
+  if (bare) {
+    const dom = bare[0].replace(/[),.;]+$/u, "");
+    return /^https?:\/\//iu.test(dom) ? dom : `https://${dom}`;
+  }
+  const known = KNOWN_SITES.find((s) => s.match.test(normalized));
+  if (known) {
+    return known.url;
+  }
+  // "открой сайт <name>" -> treat the name as a .com domain guess.
+  if (SITE_WORDS.test(normalized)) {
+    const after = String(raw).match(/(?:сайт|site|website|страниц\w*)\s+([a-z0-9.-]{2,})/iu);
+    if (after?.[1]) {
+      const name = after[1].toLowerCase();
+      if (name.includes(".")) {
+        return /^https?:\/\//iu.test(name) ? name : `https://${name}`;
+      }
+      return `https://www.${name}.com`;
+    }
+  }
+  return null;
+}
+
+function extractFreeAppName(raw, { hasOpenVerb, hasCloseVerb }) {
+  if (!hasOpenVerb && !hasCloseVerb) {
+    return null;
+  }
+  // Take the words after the verb, drop filler/stop words; keep it short to
+  // avoid false positives on long sentences.
+  const words = String(raw)
+    .replace(/[«»"“”]/gu, " ")
+    .split(/\s+/u)
+    .map((w) => w.trim())
+    .filter(Boolean);
+  if (words.length === 0 || words.length > 6) {
+    return null;
+  }
+  const verbRe = new RegExp(`^(${OPEN_VERBS.source}|${CLOSE_VERBS.source})`, "iu");
+  const verbIdx = words.findIndex((w) => verbRe.test(w));
+  const after = (verbIdx >= 0 ? words.slice(verbIdx + 1) : words)
+    .filter((w) => !STOP_APP_WORDS.has(w.toLowerCase()));
+  const name = after.join(" ").trim();
+  if (name.length < 2 || name.length > 40) {
+    return null;
+  }
+  // Reject obvious non-app phrases.
+  if (/[?!]/u.test(name) || /\b(почему|как|что|когда|кто|зачем|сколько)\b/iu.test(name)) {
+    return null;
+  }
+  return name;
 }
 
 export function tryCreateNaturalDeviceCommand(
