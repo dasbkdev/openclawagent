@@ -8846,3 +8846,21 @@ browser tabs.
 ### Verification
 - Local + server (git deploy) npm test: 242 passed, 0 failed.
 - Deployed via the new git deploy script (one command).
+
+## 2026-06-15 - Finished the interrupted handler.js split
+
+The sub-agent had hit its session limit mid-split. Finished it safely:
+- `src/telegram/format.js` — presentation primitives (title/subtitle/kv/code/
+  codeLine/formatRole/formatTaskStatus/formatSource/formatDateTime/formatSeconds/
+  normalizeSearchToken/isNaturalRemainingDoneText/stepIcon/stepStatusLabel/
+  formatAssistantAnswer). Pure, no store/network.
+- `src/telegram/format-reports.js` — report/status formatters (Metricon/Platrum/
+  Bitrix reports, invite/reset help, device agents, Google/AI/integrations
+  status, formatTelegramError, helpText, unknownCommandText).
+- handler.js imports both; **2135 → 1565 lines (-570)**.
+- Removed the dead orphan format.js the sub-agent left earlier; redid it
+  cleanly and went further (report formatters too).
+- Local + server (git deploy) npm test: 242 passed, 0 failed. Deployed.
+
+Remaining (optional, not blocking): command-handlers / natural-handlers /
+voice-bridge / resolvers could still move out, but the bulk (formatters) is done.
