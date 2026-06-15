@@ -8864,3 +8864,32 @@ The sub-agent had hit its session limit mid-split. Finished it safely:
 
 Remaining (optional, not blocking): command-handlers / natural-handlers /
 voice-bridge / resolvers could still move out, but the bulk (formatters) is done.
+
+## 2026-06-15 - PostgreSQL store backend (point 3) — LIVE
+
+Moved control-plane state off the file+lock JsonStore onto PostgreSQL.
+
+- `src/infra/pg-store.js` — PgStore: same interface as JsonStore (load/save/
+  update/filePath). Whole state in one jsonb row `control_plane_state(id,data,
+  updated_at)`. Concurrency = transaction + pg_advisory_xact_lock + FOR UPDATE
+  (true cross-process safety, no file lock, no lock-timeout starvation).
+- `src/infra/store-factory.js` — `createStore()` picks Postgres when
+  CONTROL_PLANE_STORE=postgres AND a connection string is set; else JsonStore.
+  `pg` is an optionalDependency, dynamic-imported only in Postgres mode.
+- server.js + telegram-bot.js now `await createStore(...)`.
+- `scripts/linux/migrate-to-postgres.mjs` — copies file state into the jsonb row.
+- `test/pg-store.test.js` — 5 tests with an in-memory fake pool. Suite: 247 pass.
+
+Production cutover (server 195.238.122.228):
+- Dedicated container `starlab-cp-postgres` (postgres:16-alpine) on 127.0.0.1:5433,
+  volume starlab-cp-pgdata, db/role `controlplane`. Separate from n8n's postgres.
+- `npm install pg` into /opt/company-control-plane (was zero-dep).
+- Migrated 5 users / 3 projects / ~1MB. Flipped env, restarted both services.
+- Verified LIVE: 3 DB connections, row updated_at advanced post-restart (reads+
+  writes go through PG), no errors, bot polling. Health ok.
+- Rollback: drop the 2 env lines (backup .bak.<ts>) + restart -> file fallback
+  at /var/lib/company-control-plane/control-plane.json (still present).
+
+Note: device command queue lives in state -> now durable in Postgres for free;
+Telegram offset redelivers unprocessed updates. So no separate job-queue table
+was needed. pgvector for memory remains an optional future sub-stage.
