@@ -558,7 +558,9 @@ async function readWebResearchContext({ question, claudeClient, now }) {
       ].join(" "),
       user: String(question),
       maxTokens: 2500,
-      timeoutMs: 90000,
+      timeoutMs: 120000,
+      maxSearches: 5,
+      includeFetch: false,
     });
     if (!result?.text) {
       return null;

@@ -1,5 +1,5 @@
 import { ClaudeApiError } from "../assistant/claude-client.js";
-import { answerCompanyAssistant } from "../assistant/company-assistant.js";
+import { answerCompanyAssistant, isWebResearchQuery } from "../assistant/company-assistant.js";
 import { buildBitrixProjectStatusReport } from "../domain/bitrix-reports.js";
 import { buildPlatrumProjectStatusReport } from "../domain/platrum-reports.js";
 import {
@@ -432,6 +432,9 @@ export async function handleTelegramMessage({
             return;
           }
 
+          if (isWebResearchQuery(command.raw)) {
+            await telegram.sendMessage({ chatId, text: "🔎 Ищу в интернете, это может занять минуту-полторы…" }).catch(() => {});
+          }
           const answer = await answerCompanyAssistant({
             store,
             telegramUserId,

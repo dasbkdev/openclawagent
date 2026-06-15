@@ -8742,3 +8742,28 @@ browser service).
   questions by default.
 - Browser automation surfaces through the `/task` planner (agent-loop); the
   assistant uses `browse_web` when a task needs real page interaction.
+
+## 2026-06-15 - Fix: web search timed out on broad queries (assistant returned webResearch=null)
+
+### Problem (user-reported)
+"найди топ 10 лучших айти компаний кыргызстана" → assistant said it has no
+internet and webResearch=null. Diagnosis on a copy of prod state showed
+`web research failed: This operation was aborted`: the search worked for short
+queries (USD rate) but a broad query made the model do many web_fetch page
+reads and blow past the 90s timeout, so readWebResearchContext caught the abort
+and returned null.
+
+### Fix
+- `claude-client.js researchWeb`: web_fetch is now opt-in (`includeFetch`,
+  default false) — web_search snippets are enough for chat answers and far
+  faster; `max_uses` caps on both tools (search 5, fetch 3).
+- `company-assistant.js`: web research call uses includeFetch:false,
+  maxSearches:5, timeout 120s.
+- `handler.js`: send "🔎 Ищу в интернете, это может занять минуту-полторы…"
+  before a web-research answer so the user sees progress.
+
+### Verification (live on prod, copy of state)
+- Same query now returns a real top-10 list with 12 sources.
+- Time: 188s (with fetch) → 76s (search-only). All tests 233/233.
+- web_fetch (full page reads) is still used by the browser/agent path, where
+  latency is less critical.

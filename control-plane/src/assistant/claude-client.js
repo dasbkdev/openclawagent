@@ -93,15 +93,18 @@ export class HttpClaudeClient {
    *
    * Web tools are billed per use — callers gate when to invoke this.
    */
-  async researchWeb({ system, user, maxTokens = 2500, model, maxRounds = 4, timeoutMs }) {
+  async researchWeb({ system, user, maxTokens = 2500, model, maxRounds = 4, timeoutMs, maxSearches = 5, includeFetch = false }) {
     const requestModel = model || this.model;
     const previousTimeout = this.timeoutMs;
     if (timeoutMs) {
       this.timeoutMs = timeoutMs;
     }
+    // web_search returns snippets quickly; web_fetch reads full pages and is
+    // much slower, so it's opt-in (used by the browser/agent path, not the
+    // fast chat answer). Cap uses so a broad query can't run for minutes.
     const tools = [
-      { type: "web_search_20260209", name: "web_search" },
-      { type: "web_fetch_20260209", name: "web_fetch" },
+      { type: "web_search_20260209", name: "web_search", max_uses: maxSearches },
+      ...(includeFetch ? [{ type: "web_fetch_20260209", name: "web_fetch", max_uses: 3 }] : []),
     ];
     const messages = [{ role: "user", content: user }];
     let payload = null;
