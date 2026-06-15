@@ -8628,3 +8628,36 @@ but not "visual studio code".
 - Local + server npm test: 220 passed, 0 failed (+ app-aliases tests).
 - LIVE: queued open_app "Visual Studio Code" to user's device; server rewrote
   args.app -> "code"; agent executed; status succeeded in ~4s.
+
+## 2026-06-15 - Universal open_app: open ANY installed application
+
+### Goal
+User wants to open any app installed on the device, not just a dictionary of
+common ones.
+
+### Implemented (agent-side; opens any installed app)
+- Windows openApp now uses a 3-stage universal resolver:
+  1. Direct Start-Process (PATH + App Paths registry + full paths / known
+     alias target).
+  2. `Get-StartApps` fuzzy match by the human label → launch via
+     `shell:AppsFolder\<AppID>` — covers Win32 AND Store/UWP apps (Start menu).
+  3. Start Menu `.lnk` shortcut search by name.
+  Echoes which method matched; errors only if nothing found.
+- Applied in both clients:
+  - `openclaw-starlab-2026.6.5/apps/windows/src/main.cjs` (the agent users run).
+  - `control-plane/src/agent-tools/executor.js` (our Electron/CLI executor).
+- Server passes the human label as args.appLabel so the agent can fuzzy-search
+  by display name even when the alias target ("code") is used for direct launch.
+
+### Validation
+- Get-StartApps verified on a real Windows box: 171 apps enumerated, fuzzy
+  name match works. Server + local npm test: 220 passed, 0 failed.
+
+### Delivery note (IMPORTANT)
+- This is agent-side logic → it reaches a user's machine only via a new agent
+  build. The Windows agent auto-updates from /downloads/releases.json (checks
+  ~6h, SHA-256 verified, user confirms install). To ship: build new
+  starlab-openclaw-agent-windows.exe (bump 2026.6.7 → 2026.6.8), publish to
+  server /downloads, bump releases.json. Until then, the CURRENT agent already
+  opens: dictionary apps (server-side resolver, ~20 common apps) + anything on
+  PATH / App Paths registry. Display-name-only and Store apps need the update.

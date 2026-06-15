@@ -39,16 +39,19 @@ test("escapeAppleScriptLiteral escapes quotes and backslashes", () => {
   assert.equal(escapeAppleScriptLiteral('a "b" \\c'), 'a \\"b\\" \\\\c');
 });
 
-test("buildWindowsCommand open_app tries multiple candidates and resolves known apps", () => {
-  const notepad = buildWindowsCommand("open_app", { name: "notepad" });
-  assert.match(notepad, /Start-Process -FilePath \$p/u);
-  assert.match(notepad, /"notepad"/u);
-
-  // Human name for VS Code must resolve to the real launch target "code".
+test("buildWindowsCommand open_app resolves known apps and falls back to universal lookup", () => {
   const vscode = buildWindowsCommand("open_app", { app: "Visual Studio Code" });
   assert.match(vscode, /"code"/u);
   assert.match(vscode, /foreach \(\$c in \$cands\)/u);
   assert.match(vscode, /ExpandEnvironmentVariables/u);
+  // Universal fallback for ANY installed app.
+  assert.match(vscode, /Get-StartApps/u);
+  assert.match(vscode, /Start Menu/u);
+
+  // Arbitrary app name still produces a runnable lookup script.
+  const custom = buildWindowsCommand("open_app", { app: "SomeRandomApp", appLabel: "Some Random App" });
+  assert.match(custom, /Get-StartApps/u);
+  assert.match(custom, /Some Random App/u);
 });
 
 test("buildWindowsCommand escapes clipboard payload", () => {

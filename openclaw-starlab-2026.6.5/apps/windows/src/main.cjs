@@ -497,9 +497,53 @@ async function openApp(args) {
   if (!appName) {
     throw new Error("open_app requires args.app");
   }
+  // Prefer the human label for fuzzy lookup ("Visual Studio Code"), fall back
+  // to a known alias target ("code"). The universal resolver below can open
+  // ANY installed app: direct launch, then the Start menu apps (incl. Store /
+  // UWP via Get-StartApps), then a Start Menu shortcut search.
+  const label = readArg(args, ["appLabel"]) || appName;
   const target = resolveWindowsAppTarget(appName);
-  await runPowerShell(`Start-Process -FilePath ${psString(target)}`);
-  return { opened: appName, target };
+  const result = await runPowerShell(buildUniversalOpenScript({ target, label }), { timeoutMs: 25000 });
+  const method = String(result.stdout || "").trim() || "started";
+  return { opened: appName, target, method };
+}
+
+// PowerShell that opens any installed app: direct -> Get-StartApps fuzzy ->
+// Start Menu .lnk search. Echoes which method succeeded; exits non-zero only
+// if nothing matched.
+function buildUniversalOpenScript({ target, label }) {
+  return `
+$ErrorActionPreference = 'SilentlyContinue'
+$target = ${psString(target)}
+$label = ${psString(label)}
+
+# 1) Direct launch (PATH, App Paths registry, full path).
+try { Start-Process -FilePath $target -ErrorAction Stop; Write-Output 'direct'; exit 0 } catch {}
+if ($label -ne $target) {
+  try { Start-Process -FilePath $label -ErrorAction Stop; Write-Output 'direct-label'; exit 0 } catch {}
+}
+
+# 2) Start menu apps (Win32 + Store/UWP) via Get-StartApps, fuzzy by name.
+$needle = $label
+$apps = Get-StartApps | Where-Object { $_.Name -like ('*' + $needle + '*') }
+if (-not $apps) { $apps = Get-StartApps | Where-Object { $_.Name -like ('*' + $target + '*') } }
+if ($apps) {
+  $best = $apps | Sort-Object { $_.Name.Length } | Select-Object -First 1
+  Start-Process ('shell:AppsFolder\\' + $best.AppID)
+  Write-Output ('startapps:' + $best.Name)
+  exit 0
+}
+
+# 3) Start Menu shortcut (.lnk) search.
+$roots = @("$env:ProgramData\\Microsoft\\Windows\\Start Menu","$env:AppData\\Microsoft\\Windows\\Start Menu")
+$lnk = Get-ChildItem -Path $roots -Recurse -Filter *.lnk -ErrorAction SilentlyContinue |
+  Where-Object { $_.BaseName -like ('*' + $needle + '*') } |
+  Sort-Object { $_.BaseName.Length } | Select-Object -First 1
+if ($lnk) { Start-Process $lnk.FullName; Write-Output ('shortcut:' + $lnk.BaseName); exit 0 }
+
+Write-Error ('Приложение не найдено: ' + $label)
+exit 1
+`;
 }
 
 async function closeApp(args) {

@@ -177,26 +177,36 @@ function resolveWindowsAppTargets(name) {
 
 function buildWindowsOpenApp(args) {
   const name = args.name || args.app || args.path;
+  const label = args.appLabel || name;
   const targets = resolveWindowsAppTargets(name);
   if (targets.length === 0) {
     return "Write-Error 'no app name'; exit 1";
   }
-  // PowerShell array of expandable candidate paths; try each until one starts.
+  // Try mapped candidates directly, then fall back to a universal lookup that
+  // can open ANY installed app: Get-StartApps (Win32 + Store/UWP) and a Start
+  // Menu shortcut search.
   const arrayLiteral = targets
     .map((t) => `"${escapePowerShellDouble(expandableLiteral(t))}"`)
     .join(", ");
+  const labelLit = `"${escapePowerShellDouble(String(label))}"`;
   return [
+    "$ErrorActionPreference = 'SilentlyContinue'",
     `$cands = @(${arrayLiteral})`,
     "$ok = $false",
     "foreach ($c in $cands) {",
-    "  try {",
-    "    $p = [System.Environment]::ExpandEnvironmentVariables($c)",
-    "    Start-Process -FilePath $p -ErrorAction Stop",
-    "    $ok = $true; break",
-    "  } catch {}",
+    "  try { Start-Process -FilePath ([System.Environment]::ExpandEnvironmentVariables($c)) -ErrorAction Stop; $ok = $true; break } catch {}",
     "}",
-    `if (-not $ok) { Write-Error ('Не удалось открыть приложение: ' + ${`"${escapePowerShellDouble(String(name))}"`}); exit 1 }`,
-    "Write-Output 'opened'",
+    `$needle = ${labelLit}`,
+    "if (-not $ok) {",
+    "  $apps = Get-StartApps | Where-Object { $_.Name -like ('*' + $needle + '*') }",
+    "  if ($apps) { $b = $apps | Sort-Object { $_.Name.Length } | Select-Object -First 1; Start-Process ('shell:AppsFolder\\' + $b.AppID); Write-Output ('startapps:' + $b.Name); $ok = $true }",
+    "}",
+    "if (-not $ok) {",
+    "  $roots = @(\"$env:ProgramData\\Microsoft\\Windows\\Start Menu\",\"$env:AppData\\Microsoft\\Windows\\Start Menu\")",
+    "  $lnk = Get-ChildItem -Path $roots -Recurse -Filter *.lnk -ErrorAction SilentlyContinue | Where-Object { $_.BaseName -like ('*' + $needle + '*') } | Sort-Object { $_.BaseName.Length } | Select-Object -First 1",
+    "  if ($lnk) { Start-Process $lnk.FullName; Write-Output ('shortcut:' + $lnk.BaseName); $ok = $true }",
+    "}",
+    `if (-not $ok) { Write-Error ('Приложение не найдено: ' + ${labelLit}); exit 1 }`,
   ].join("; ");
 }
 
