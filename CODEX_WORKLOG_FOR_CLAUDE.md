@@ -8767,3 +8767,44 @@ and returned null.
 - Time: 188s (with fetch) → 76s (search-only). All tests 233/233.
 - web_fetch (full page reads) is still used by the browser/agent path, where
   latency is less critical.
+
+## 2026-06-15 - Tech-debt sprint: non-blocking bot, async distill, git deploy, token rotation
+
+User approved fixing weak points 1,2,3,5,6,7 (skip 4). Decided NOT to add Redis
+— durable queue will live in the coming Postgres, avoiding a second component.
+
+### Done & deployed
+- #1 Non-blocking bot (`telegram-bot.js`): updates now processed CONCURRENTLY
+  with a bounded pool (`BOT_MAX_CONCURRENT_UPDATES`, default 6). A slow message
+  (web search ~1min, /task minutes, heavy report) no longer blocks polling or
+  other users. Backpressure via Promise.race on the in-flight set.
+- #5 Async memory distillation (`company-assistant.js`): `distillAssistantMemory`
+  is now fire-and-forget — the answer is returned/sent immediately, the Haiku
+  distill runs in the background.
+- #2 Git-based deploy: server now has a git checkout at `/opt/starlab-repo`
+  (branch server, public repo, no auth). `scripts/linux/deploy-from-git.sh`:
+  fetch+reset → rsync src/test/scripts into runtime (never touches data/secrets/
+  downloads) → npm test (aborts on failure) → restart → health. Verified
+  end-to-end (233/233). Replaces manual per-file scp.
+- #7 Token rotation: `scripts/linux/rotate-tokens.sh` rotates infra tokens
+  (INTERNAL_API_TOKEN, AUTOMATION_API_TOKEN, BROWSER_SERVICE_TOKEN) in one place,
+  syncing BROWSER_SERVICE_TOKEN across env AND the browser systemd unit
+  atomically, with env backup, then restarts consumers. Verified: env/unit in
+  sync, all services active, browser auth 200 with the new token. User API keys
+  (Claude/Google/Metricon/ElevenLabs) stay in the encrypted /setup store,
+  untouched.
+
+### Deferred (honestly)
+- #6 Split handler.js/router.js: sub-agent started (extracted formatters to
+  format.js) but hit its session limit before wiring it in; reverted the
+  orphan dup to avoid leaving a half-refactor. handler.js stays monolithic but
+  working. Finish in a focused pass — pure mechanics.
+- #3 PostgreSQL: large, separate focused block. The acute pain (lock timeouts
+  blocking users) is already gone via the non-blocking bot, so this is no longer
+  urgent. Plan: PgStore (jsonb + advisory lock, same interface as JsonStore) →
+  data migration from control-plane.json → durable job queue in DB → pgvector
+  for memory. Adds a `pg` dependency (changes zero-dep stance — deliberate).
+
+### Verification
+- Local + server (via git deploy) npm test: 233 passed, 0 failed. Services
+  active. Deploy now one command: `bash .../scripts/linux/deploy-from-git.sh`.
