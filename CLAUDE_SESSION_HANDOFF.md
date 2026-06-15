@@ -39,27 +39,33 @@
 - `.codex-temp/` — мои диагностические скрипты (диагностика маппингов,
   Google, Metricon). Можно переиспользовать/удалять.
 
-## 3. Деплой (отработанный процесс)
+## 3. Деплой — ТЕПЕРЬ ИЗ GIT (не scp!)
+
+С 2026-06-15 деплой из git-чекаута на сервере (`/opt/starlab-repo`, ветка
+server, публичный репо). Процесс:
 
 ```bash
-# из control-plane/, PATH с node
-npm test                       # должно быть 0 fail (база растёт, см. §6)
-# копируем на сервер
-scp -i ~/.ssh/starlab_server -o BatchMode=yes -r src test root@195.238.122.228:/opt/company-control-plane/
+# 1. локально: commit + push в ветку server (после npm test)
+git push origin server
+# 2. на сервере: pull repo + один скрипт (rsync code → тесты → рестарт → health)
 ssh -i ~/.ssh/starlab_server -o BatchMode=yes root@195.238.122.228 \
-  "chown -R company-control-plane:company-control-plane /opt/company-control-plane/src /opt/company-control-plane/test && \
-   cd /opt/company-control-plane && npm test 2>&1 | grep -E '^. (tests|pass|fail)' && \
-   systemctl restart company-control-plane-api.service company-control-plane-telegram-bot.service && \
-   sleep 4 && systemctl is-active company-control-plane-api.service company-control-plane-telegram-bot.service && \
-   curl -s http://127.0.0.1:3099/health"
+  'cd /opt/starlab-repo && git fetch --depth 5 origin server && git reset --hard origin/server && \
+   bash /opt/company-control-plane/scripts/linux/deploy-from-git.sh'
 ```
 
-- Есть готовый скрипт `control-plane/scripts/deploy-to-server.ps1` (PuTTY-based).
+- Скрипт `control-plane/scripts/linux/deploy-from-git.sh`: rsync только
+  src/test/scripts (НЕ трогает data/secrets/public/downloads), прогон npm test
+  (прерывает деплой при fail), рестарт api+bot+browser, health.
+- Старый ручной scp по файлам больше не нужен (был источником рассинхрона).
+- Ротация инфра-токенов: `scripts/linux/rotate-tokens.sh [NAME...]` —
+  INTERNAL_API_TOKEN / AUTOMATION_API_TOKEN / BROWSER_SERVICE_TOKEN атомарно
+  (browser-токен синхронит env + systemd unit). User API keys — через /setup.
 - После ручной правки runtime-файлов от root — вернуть владельца
-  `company-control-plane:company-control-plane`, права 600, иначе сервис
-  падает с EACCES.
-- Desktop-agent (Electron) на сервер НЕ деплоится — он собирается через CI
-  `.github/workflows/build-desktop-agents.yml` (.exe/.dmg).
+  `company-control-plane:company-control-plane`, права 600 (EACCES иначе).
+- Desktop-agent (Electron) на сервер НЕ деплоится — CI собирает .exe/.dmg.
+- Browser-service (Playwright): `/opt/starlab-browser-service`, systemd
+  `starlab-browser-service`, порт 3210, Chromium установлен. Веб-поиск — через
+  Anthropic web_search в ассистенте (см. claude-client researchWeb).
 
 ## 4. Грабли (на чём уже спотыкался)
 
