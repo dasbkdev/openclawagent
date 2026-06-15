@@ -8596,3 +8596,35 @@ Opus sub-agent (Obsidian exporter).
 - Vault also opens in desktop Obsidian if ever wanted (same folder).
 - Basic-auth creds for /memory are NOT stored in git; issue to Nikolay
   separately. Consider Tailscale-only access later.
+
+## 2026-06-15 - Fix: open_app failed for human app names ("Visual Studio Code")
+
+### Problem (user-reported)
+User sent "открыть Visual Studio Code"; command queued but VS Code never
+opened. Diagnosis: user's device (dasmu-win, ver 2026.6.7, online,
+command-polling works — other commands succeed) ran
+`Start-Process -FilePath 'Visual Studio Code'`, which fails because that is a
+display name, not an executable. The agent's own alias map had "vscode"/"code"
+but not "visual studio code".
+
+### Fix (server-side, immediate for ALL installed agents — no rebuild)
+- New `src/domain/app-aliases.js` `resolveOpenAppTarget(appName, platform)`:
+  Windows maps human names to launch targets (Visual Studio Code → "code",
+  Google Chrome → "chrome", Блокнот → "notepad", …); macOS keeps display names
+  (for `open -a`); linux unchanged.
+- `createDeviceCommand` (device-agents.js) resolves open_app's app name against
+  the TARGET device's platform before queuing. Original kept as args.appLabel
+  (only when changed). So existing agents receive a target their Start-Process
+  / open -a can resolve.
+
+### Fix (clients, defense-in-depth, ships on next build)
+- `src/agent-tools/executor.js` (our Electron/CLI executor): open_app now tries
+  multiple candidates (mapped target, PATH name, full paths, %ENV% expansion)
+  via a foreach loop instead of one Start-Process.
+- `openclaw-starlab-2026.6.5/apps/windows/src/main.cjs`: added
+  "visual studio code"/"vs code" to WINDOWS_APP_ALIASES.
+
+### Verification
+- Local + server npm test: 220 passed, 0 failed (+ app-aliases tests).
+- LIVE: queued open_app "Visual Studio Code" to user's device; server rewrote
+  args.app -> "code"; agent executed; status succeeded in ~4s.

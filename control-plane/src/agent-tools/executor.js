@@ -108,6 +108,22 @@ export function escapePowerShellLiteral(value) {
   return String(value ?? "").replace(/'/gu, "''");
 }
 
+// Escape for a PowerShell double-quoted string. Backtick is the PS escape
+// char; we keep %ENV% intact for ExpandEnvironmentVariables and forbid `$`
+// expansion by escaping it.
+export function escapePowerShellDouble(value) {
+  return String(value ?? "")
+    .replace(/`/gu, "``")
+    .replace(/"/gu, '`"')
+    .replace(/\$/gu, "`$");
+}
+
+// A target path may contain %ENV% placeholders expanded at runtime by
+// [Environment]::ExpandEnvironmentVariables. Returned as-is here.
+function expandableLiteral(value) {
+  return String(value ?? "");
+}
+
 // Escape a string for embedding inside an AppleScript double-quoted string.
 export function escapeAppleScriptLiteral(value) {
   return String(value ?? "")
@@ -115,17 +131,81 @@ export function escapeAppleScriptLiteral(value) {
     .replace(/"/gu, '\\"');
 }
 
+// Map common human app names to candidate Windows launch targets. A
+// human-readable name like "Visual Studio Code" is NOT a valid -FilePath;
+// open_app tries these candidates in order until one launches.
+const WINDOWS_APP_TARGETS = [
+  { match: /visual studio code|vs ?code|вс ?код|вижуал/iu, targets: ["code", "code.cmd", "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe", "Code.exe"] },
+  { match: /google chrome|chrome|хром/iu, targets: ["chrome", "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe", "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"] },
+  { match: /firefox|файрфокс|фаерфокс/iu, targets: ["firefox", "%ProgramFiles%\\Mozilla Firefox\\firefox.exe"] },
+  { match: /\bedge\b|майкрософт эдж|эдж/iu, targets: ["msedge"] },
+  { match: /telegram|телеграм/iu, targets: ["Telegram", "%AppData%\\Telegram Desktop\\Telegram.exe"] },
+  { match: /word|ворд/iu, targets: ["winword"] },
+  { match: /excel|эксель/iu, targets: ["excel"] },
+  { match: /power ?point|поинт/iu, targets: ["powerpnt"] },
+  { match: /outlook|аутлук/iu, targets: ["outlook"] },
+  { match: /notepad\+\+|нотпад\+\+/iu, targets: ["notepad++", "%ProgramFiles%\\Notepad++\\notepad++.exe"] },
+  { match: /notepad|блокнот/iu, targets: ["notepad"] },
+  { match: /calculator|калькул/iu, targets: ["calc"] },
+  { match: /\bterminal\b|терминал/iu, targets: ["wt", "cmd"] },
+  { match: /powershell|поверш/iu, targets: ["powershell"] },
+  { match: /command prompt|\bcmd\b|командн/iu, targets: ["cmd"] },
+  { match: /explorer|проводник|файлов/iu, targets: ["explorer"] },
+  { match: /spotify|спотифай/iu, targets: ["spotify", "%AppData%\\Spotify\\Spotify.exe"] },
+  { match: /zoom|зум/iu, targets: ["%AppData%\\Zoom\\bin\\Zoom.exe", "zoom"] },
+  { match: /discord|дискорд/iu, targets: ["%LOCALAPPDATA%\\Discord\\Update.exe", "discord"] },
+  { match: /paint|пейнт/iu, targets: ["mspaint"] },
+];
+
+function resolveWindowsAppTargets(name) {
+  const raw = String(name || "").trim();
+  if (!raw) {
+    return [];
+  }
+  const known = WINDOWS_APP_TARGETS.find((entry) => entry.match.test(raw));
+  const candidates = [];
+  if (known) {
+    candidates.push(...known.targets);
+  }
+  // Always also try the given name as-is and with .exe — covers exes on PATH.
+  candidates.push(raw);
+  if (!/\.[a-z0-9]{2,4}$/iu.test(raw)) {
+    candidates.push(`${raw}.exe`);
+  }
+  return [...new Set(candidates)];
+}
+
+function buildWindowsOpenApp(args) {
+  const name = args.name || args.app || args.path;
+  const targets = resolveWindowsAppTargets(name);
+  if (targets.length === 0) {
+    return "Write-Error 'no app name'; exit 1";
+  }
+  // PowerShell array of expandable candidate paths; try each until one starts.
+  const arrayLiteral = targets
+    .map((t) => `"${escapePowerShellDouble(expandableLiteral(t))}"`)
+    .join(", ");
+  return [
+    `$cands = @(${arrayLiteral})`,
+    "$ok = $false",
+    "foreach ($c in $cands) {",
+    "  try {",
+    "    $p = [System.Environment]::ExpandEnvironmentVariables($c)",
+    "    Start-Process -FilePath $p -ErrorAction Stop",
+    "    $ok = $true; break",
+    "  } catch {}",
+    "}",
+    `if (-not $ok) { Write-Error ('Не удалось открыть приложение: ' + ${`"${escapePowerShellDouble(String(name))}"`}); exit 1 }`,
+    "Write-Output 'opened'",
+  ].join("; ");
+}
+
 // Build the PowerShell command string for a given action. Returns null when the
 // action has no PowerShell-string form (handled by fs instead).
 export function buildWindowsCommand(type, args = {}) {
   switch (type) {
-    case "open_app": {
-      const name = escapePowerShellLiteral(args.name || args.app || args.path);
-      const params = args.args ? buildPwshArgList(args.args) : null;
-      return params
-        ? `Start-Process -FilePath '${name}' -ArgumentList ${params}`
-        : `Start-Process -FilePath '${name}'`;
-    }
+    case "open_app":
+      return buildWindowsOpenApp(args);
     case "close_app": {
       const name = escapePowerShellLiteral(stripExe(args.name || args.app));
       return `Stop-Process -Name '${name}' -Force -ErrorAction Stop`;

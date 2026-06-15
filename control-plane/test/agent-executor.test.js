@@ -39,9 +39,16 @@ test("escapeAppleScriptLiteral escapes quotes and backslashes", () => {
   assert.equal(escapeAppleScriptLiteral('a "b" \\c'), 'a \\"b\\" \\\\c');
 });
 
-test("buildWindowsCommand builds Start-Process for open_app", () => {
-  const command = buildWindowsCommand("open_app", { name: "notepad" });
-  assert.equal(command, "Start-Process -FilePath 'notepad'");
+test("buildWindowsCommand open_app tries multiple candidates and resolves known apps", () => {
+  const notepad = buildWindowsCommand("open_app", { name: "notepad" });
+  assert.match(notepad, /Start-Process -FilePath \$p/u);
+  assert.match(notepad, /"notepad"/u);
+
+  // Human name for VS Code must resolve to the real launch target "code".
+  const vscode = buildWindowsCommand("open_app", { app: "Visual Studio Code" });
+  assert.match(vscode, /"code"/u);
+  assert.match(vscode, /foreach \(\$c in \$cands\)/u);
+  assert.match(vscode, /ExpandEnvironmentVariables/u);
 });
 
 test("buildWindowsCommand escapes clipboard payload", () => {

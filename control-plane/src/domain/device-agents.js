@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { validation } from "./errors.js";
 import { hashInviteCode, normalizeInviteCode } from "./invite-codes.js";
 import { getUserById, listAccessibleUserIds, assertCanAccessUser } from "./policy.js";
+import { resolveOpenAppTarget } from "./app-aliases.js";
 
 const MAX_STRING = 240;
 const DEVICE_TOKEN_BYTES = 32;
@@ -182,6 +183,19 @@ export function createDeviceCommand(state, payload, { actor, now = new Date() } 
   assertAgentCanExecuteCommand(agent, type);
   const nowIso = now.toISOString();
   const ttlSeconds = normalizeTtlSeconds(payload.ttlSeconds);
+  const args = normalizeCommandArgs(payload.args || payload.action?.args || {});
+  // Resolve human app names ("Visual Studio Code") to a launch target the
+  // target device's OS can actually open. Works for already-installed agents.
+  if (type === "open_app") {
+    const appName = args.app || args.name || args.path;
+    if (appName) {
+      const resolved = resolveOpenAppTarget(appName, agent.platform);
+      if (resolved !== appName) {
+        args.app = resolved;
+        args.appLabel = String(appName);
+      }
+    }
+  }
   const command = {
     id: `cmd-${crypto.randomUUID()}`,
     deviceId: agent.deviceId,
@@ -189,7 +203,7 @@ export function createDeviceCommand(state, payload, { actor, now = new Date() } 
     actorUserId: actor.id,
     source: normalizeOptionalString(payload.source) || "api",
     type,
-    args: normalizeCommandArgs(payload.args || payload.action?.args || {}),
+    args,
     status: "queued",
     createdAt: nowIso,
     updatedAt: nowIso,

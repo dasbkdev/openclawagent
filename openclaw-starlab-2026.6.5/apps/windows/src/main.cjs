@@ -61,6 +61,14 @@ const WINDOWS_APP_ALIASES = {
     path.join(process.env.LOCALAPPDATA || "", "Programs", "Microsoft VS Code", "Code.exe"),
     "code",
   ],
+  "vs code": [
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Microsoft VS Code", "Code.exe"),
+    "code",
+  ],
+  "visual studio code": [
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Microsoft VS Code", "Code.exe"),
+    "code",
+  ],
   code: [
     path.join(process.env.LOCALAPPDATA || "", "Programs", "Microsoft VS Code", "Code.exe"),
     "code",
