@@ -39,6 +39,10 @@ export class MissingClaudeClient {
     };
   }
 
+  async researchWeb() {
+    return { text: "", sources: [], model: this.model, usage: null, configured: false };
+  }
+
   async healthCheck() {
     return {
       ok: false,
@@ -77,6 +81,49 @@ export class HttpClaudeClient {
       model: payload.model || requestModel,
       usage: normalizeUsage(payload.usage),
       stopReason: payload.stop_reason || null,
+      configured: true,
+    };
+  }
+
+  /**
+   * Research a question against the live web using Anthropic's server-side
+   * web_search + web_fetch tools. Anthropic runs the search/fetch; we only
+   * declare the tools and loop on `pause_turn` until the model is done.
+   * Returns the answer text plus the source URLs it consulted.
+   *
+   * Web tools are billed per use — callers gate when to invoke this.
+   */
+  async researchWeb({ system, user, maxTokens = 2500, model, maxRounds = 4, timeoutMs }) {
+    const requestModel = model || this.model;
+    const previousTimeout = this.timeoutMs;
+    if (timeoutMs) {
+      this.timeoutMs = timeoutMs;
+    }
+    const tools = [
+      { type: "web_search_20260209", name: "web_search" },
+      { type: "web_fetch_20260209", name: "web_fetch" },
+    ];
+    const messages = [{ role: "user", content: user }];
+    let payload = null;
+    try {
+      for (let round = 0; round < maxRounds; round += 1) {
+        payload = await this.sendMessages({ system, messages, tools, maxTokens, model: requestModel });
+        if (payload.stop_reason === "pause_turn") {
+          // Server-side tool loop hit its limit; re-send to resume.
+          messages.push({ role: "assistant", content: payload.content });
+          continue;
+        }
+        break;
+      }
+    } finally {
+      this.timeoutMs = previousTimeout;
+    }
+    return {
+      text: readTextContent(payload),
+      sources: extractWebSources(payload),
+      model: payload?.model || requestModel,
+      usage: normalizeUsage(payload?.usage),
+      stopReason: payload?.stop_reason || null,
       configured: true,
     };
   }
@@ -178,6 +225,42 @@ export class ClaudeApiError extends Error {
     this.type = type;
     this.requestId = requestId;
   }
+}
+
+/**
+ * Pull the list of web sources (url + title) Claude consulted from a
+ * web_search/web_fetch response — from web_search_tool_result blocks,
+ * web_fetch_tool_result blocks, and text-block citations.
+ */
+export function extractWebSources(payload) {
+  const blocks = Array.isArray(payload?.content) ? payload.content : [];
+  const seen = new Set();
+  const sources = [];
+  const add = (url, title) => {
+    const cleanUrl = typeof url === "string" ? url.trim() : "";
+    if (!cleanUrl || seen.has(cleanUrl)) {
+      return;
+    }
+    seen.add(cleanUrl);
+    sources.push({ url: cleanUrl, title: typeof title === "string" ? title.trim() : "" });
+  };
+  for (const block of blocks) {
+    if (block?.type === "web_search_tool_result" && Array.isArray(block.content)) {
+      for (const item of block.content) {
+        add(item?.url, item?.title);
+      }
+    }
+    if (block?.type === "web_fetch_tool_result") {
+      const doc = block.content?.content ?? block.content;
+      add(doc?.url || block.content?.url, doc?.title || block.content?.title);
+    }
+    if (block?.type === "text" && Array.isArray(block.citations)) {
+      for (const c of block.citations) {
+        add(c?.url, c?.title);
+      }
+    }
+  }
+  return sources.slice(0, 12);
 }
 
 export function extractToolUseBlocks(payload) {

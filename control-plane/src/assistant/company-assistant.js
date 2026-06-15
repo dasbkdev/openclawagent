@@ -66,6 +66,7 @@ export async function answerCompanyAssistant({
     bitrixClient,
     platrumClient,
     googleOAuthService,
+    claudeClient,
     dataFilePath: store.filePath || null,
     now,
   });
@@ -449,6 +450,7 @@ export async function buildAssistantContext({
   bitrixClient,
   platrumClient,
   googleOAuthService,
+  claudeClient = null,
   dataFilePath = null,
   now = new Date(),
 }) {
@@ -480,6 +482,11 @@ export async function buildAssistantContext({
     dataFilePath,
   });
   const recentDeviceCommands = buildRecentDeviceCommandMemory(state, { actor, targetUsers });
+
+  // Web research: for questions needing current internet information (news,
+  // prices, weather, "найди в интернете"…), let Claude search and read the web
+  // server-side, and attach the result as grounding for the final answer.
+  const webResearch = await readWebResearchContext({ question, claudeClient, now });
 
   // Work-history: for "what did X do over the period" questions, attach each
   // target user's full chronology digest from the timeline.
@@ -517,7 +524,55 @@ export async function buildAssistantContext({
     memory,
     recentDeviceCommands,
     workHistory,
+    webResearch,
   };
+}
+
+const WEB_RESEARCH_INTENT = /(найди|поищи|загугли|погугли|в\s+интернете|в\s+сети|в\s+гугл|search\s+(the\s+)?web|google\s+it|look\s+up|погод|курс\s+(валют|доллар|евро|рубл|битко)|сколько\s+стоит|новост|последние\s+события|что\s+происходит\s+(в\s+мире|сейчас)|актуальн\w*\s+(цен|курс|новост)|расписани\w*\s+(рейс|поезд)|кто\s+(сейчас|выиграл|победил)|когда\s+(выйдет|выходит|релиз))/iu;
+
+export function isWebResearchQuery(text) {
+  return WEB_RESEARCH_INTENT.test(String(text || ""));
+}
+
+async function readWebResearchContext({ question, claudeClient, now }) {
+  const enabled = process.env.WEB_SEARCH_ENABLED !== "false";
+  if (!enabled || !claudeClient?.configured || typeof claudeClient.researchWeb !== "function") {
+    return null;
+  }
+  if (!isWebResearchQuery(question)) {
+    return null;
+  }
+  try {
+    const today = new Intl.DateTimeFormat("ru-RU", {
+      timeZone: "Asia/Bishkek",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }).format(now);
+    const result = await claudeClient.researchWeb({
+      system: [
+        `Сегодня ${today} (Asia/Bishkek).`,
+        "Найди в интернете актуальную информацию по вопросу пользователя и кратко изложи факты на русском.",
+        "Используй web_search и при необходимости web_fetch. Опирайся только на найденное; не выдумывай.",
+        "Дай сжатую сводку (5-10 строк) с конкретикой: числа, даты, имена. Не добавляй вступлений.",
+      ].join(" "),
+      user: String(question),
+      maxTokens: 2500,
+      timeoutMs: 90000,
+    });
+    if (!result?.text) {
+      return null;
+    }
+    return {
+      query: String(question).slice(0, 300),
+      summary: result.text.slice(0, 4000),
+      sources: result.sources || [],
+      fetchedAt: now.toISOString(),
+    };
+  } catch (error) {
+    console.error("web research failed:", error instanceof Error ? error.message : error);
+    return null;
+  }
 }
 
 function resolveActorByTelegramId(state, telegramUserId) {
@@ -1124,6 +1179,7 @@ function buildSystemPrompt() {
     "НИКОГДА не приписывай сотруднику задачи с другим исполнителем и не считай из них его эффективность. Если у сотрудника ноль личных задач, прямо скажи об этом; задачи проекта с другими исполнителями упоминай отдельно, называя исполнителя.",
     "Эффективность по задачам считай как completed / total * 100 только из задач, где сотрудник — исполнитель.",
     "Если в контексте есть context.workHistory — это полная хронология работы сотрудника за период из timeline (диалоги, действия агента, задачи созданы/назначены/завершены, отчёты). Для вопросов вида «что делал(а) за месяц/неделю», «история», «чем занимался» опирайся ПРЕЖДЕ ВСЕГО на workHistory: перечисли реальные события по дням/категориям, сколько задач завершено/поставлено, с кем работал. Не выдумывай — бери факты из workHistory.users[].days и totals.",
+    "Если в контексте есть context.webResearch — это свежие данные из интернета по вопросу (summary + sources). Для вопросов про новости, цены/курсы, погоду, актуальные события и любые запросы «найди в интернете» опирайся на context.webResearch.summary и кратко укажи источники (домены) из context.webResearch.sources. Не выдумывай факты поверх найденного.",
     "Не упоминай системные токены, секреты, внутренние webhook-и или пароли.",
     "Never claim that you sent, queued, executed or completed a local device command. Real desktop actions are handled by the server before Claude is called.",
     "Пиши для Telegram: короткий заголовок, затем понятные секции; без Markdown-таблиц, JSON, сырого debug-контекста и непонятных символов.",

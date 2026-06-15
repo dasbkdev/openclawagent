@@ -1,0 +1,17 @@
+{
+  "name": "starlab-browser-service",
+  "version": "1.0.0",
+  "description": "Isolated Playwright browser automation microservice for Starlab Agent",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}
