@@ -8893,3 +8893,29 @@ Production cutover (server 195.238.122.228):
 Note: device command queue lives in state -> now durable in Postgres for free;
 Telegram offset redelivers unprocessed updates. So no separate job-queue table
 was needed. pgvector for memory remains an optional future sub-stage.
+
+## 2026-06-15 - Platrum personal boards + token usage summary
+
+Two user-reported gaps.
+
+1) Platrum tasks not showing. Root cause: Platrum tasks live on BOARDS, and
+   ~2/3 (10 of 15) sit on PERSONAL boards (board_is_personal=true, project_id=
+   null: "beks board", "jesus board", etc.). The code only read project-linked
+   tasks via /api/v1/tasks/projects/{id}/tasks/, so personal-board tasks were
+   invisible. Fix:
+   - platrum-client.js: normalizePlatrumTask now keeps boardId/boardName/
+     boardIsPersonal; added getAllTasks() -> /api/v1/tasks/team/ (all boards).
+   - company-assistant.js readPlatrumContext: new boardTasks section grouped by
+     board (incl. personal), always included; added a guidance line so the model
+     uses boardTasks for "all tasks / kanban / what's in progress" questions.
+   - Verified live: getAllTasks returns 15 tasks across 9 boards, 10 personal
+     now visible.
+
+2) Token usage summary by day/week/month. Infra already existed (/tokens
+   day|week|month). Improvements: /tokens with no arg now returns day+week+month
+   in one message; access opened to OWNER role (not only the hardcoded recipient
+   id). Verified live against real data (153 events/30d, 3.79M tokens).
+   Note/optional follow-up: per-event costUsd is 0 (events don't carry cost), so
+   the "Примерная стоимость" line is hidden. Could estimate $ from model+tokens.
+
+Tests: 250 pass. Deployed 6926781.
