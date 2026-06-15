@@ -8,6 +8,7 @@ import {
 import { validation } from "../domain/errors.js";
 import { recordTokenUsageEvent } from "../domain/token-usage.js";
 import { appendAuditEvent } from "../infra/audit.js";
+import { appendTimelineEvent } from "../domain/work-timeline.js";
 
 const DEFAULT_MAX_STEPS = 12;
 const DEFAULT_COMMAND_WAIT_MS = 90_000;
@@ -208,6 +209,25 @@ export async function runAgentTask({
   if (finalSummary === null) {
     finalSummary = "Достигнут лимит шагов. Задача может быть выполнена не полностью.";
   }
+
+  void appendTimelineEvent({
+    dataFilePath: store.filePath || null,
+    userId: device?.userId || actor.id,
+    event: {
+      ts: now.toISOString(),
+      kind: "agent_task",
+      actorUserId: actor.id,
+      title: trimmed.slice(0, 200),
+      detail: `${trimmed}\n\nИтог: ${finalSummary}`,
+      links: { userIds: [actor.id, device?.userId].filter(Boolean) },
+      source: "agent-loop",
+      metadata: {
+        deviceId: device?.deviceId || null,
+        success: finalSuccess,
+        steps: steps.map((s) => ({ type: s.type, status: s.status })),
+      },
+    },
+  });
 
   await store.update((state) => {
     appendAuditEvent(state, {

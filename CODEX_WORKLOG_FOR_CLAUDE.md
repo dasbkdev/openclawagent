@@ -8534,3 +8534,65 @@ Server planner asks Claude, which calls search_files -> read results ->
 make_dir/run_script (employee confirms on the desktop) -> notify. Each step
 runs on the real machine through the command queue; progress streams to
 Telegram.
+
+## 2026-06-15 - Work timeline (full chronology) + Obsidian vault + web memory graph
+
+Goal: store EVERYTHING each user does as a chronology the assistant reads for
+"what did X do over the month" reports, and show it as a memory graph in the
+browser (Obsidian-style). Built via orchestration: Architect (Opus) +
+Opus sub-agent (Obsidian exporter).
+
+### Timeline store (source of truth, machine-first)
+- `src/domain/work-timeline.js`: append-only JSONL per user under
+  `<data dir>/work-timeline/`. appendTimelineEvent / appendTimelineEventForUsers
+  / readTimeline (period+kind filter) / summarizeTimeline / listTimelineUserIds.
+  Rich events {id, ts, userId, actorUserId, kind, title, detail, links:
+  {projectIds, taskIds, userIds}, source, metadata}. 14 kinds. Kept OUT of
+  control-plane.json (lock-guarded) to handle high volume.
+- Hooks capture everything: dialogues (company-assistant), agent task runs
+  (agent-loop), device actions (router complete), and task lifecycle.
+- `src/domain/task-sync.js`: pure diff of a user's task list vs a per-user
+  snapshot in state.taskSyncState → emits task_created / task_status_change /
+  task_completed timeline events. Hooked in the assistant context where
+  Platrum user tasks are read. This is what captures "кому какие таски ставила".
+
+### Work-history report
+- `src/domain/work-history.js`: buildWorkHistoryReport(user, from, to) reads the
+  timeline and produces a digest (totals, tasks, by-day, collaborators).
+  parseHistoryPeriod (за месяц/неделю/сегодня/«за июнь»…; fixed Cyrillic word
+  boundaries — \b is ASCII-only in JS). isWorkHistoryRequest detects intent.
+  Wired into the assistant: history questions attach context.workHistory and
+  the system prompt tells Claude to answer from it. So Begayym asking "что я
+  делала за месяц" gets a real chronology-based report.
+
+### Obsidian vault export (mirror, source of truth on server)
+- `src/domain/obsidian-export.js` (sub-agent): exportObsidianVault writes
+  People/<name>.md, Projects/<name>.md, Daily/<date>.md, Home.md with [[wiki
+  links]] from timeline + state. Single safeNoteName() keeps links consistent
+  so the graph connects. Idempotent (cleans only vaultDir).
+
+### Web memory graph (the "website like n8n" showcase)
+- Perlite (PHP) was php-fpm-only → needs nginx+fpm pair → fragile. Pivoted to a
+  self-contained static site I fully control:
+  `src/domain/memory-graph-site.js`: exportMemoryGraphSite builds graph.json
+  (people/project nodes, org+collaboration+project edges, per-node detail with
+  recent events) + a single index.html with an interactive force-graph (CDN,
+  no backend). Click a node → side panel with that person's totals and recent
+  events.
+- Bot loop auto-exports vault + graph site hourly (STARLAB_VAULT_DIR,
+  STARLAB_GRAPH_SITE_DIR envs).
+- Served at https://starlabagent.pp.ua/memory/ via nginx (alias
+  /opt/starlab-vault-web), protected by HTTP basic auth
+  (/etc/nginx/starlab-memory.htpasswd, user nikolay). Verified 401 without
+  auth, 200 with; auto-export logs "memory graph site exported".
+
+### Verification
+- Local + server npm test: 217 passed, 0 failed (+ timeline/task-sync/history/
+  obsidian/graph-site tests). Services active, logs clean.
+
+### Notes / next
+- Timeline starts empty; it fills as people use the assistant/agent. The graph
+  shows structure now (5 people, 3 projects) and gets richer over time.
+- Vault also opens in desktop Obsidian if ever wanted (same folder).
+- Basic-auth creds for /memory are NOT stored in git; issue to Nikolay
+  separately. Consider Tailscale-only access later.

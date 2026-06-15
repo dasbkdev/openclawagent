@@ -9,6 +9,9 @@ import {
 } from "../domain/assistant-memory.js";
 import { distillAssistantMemory } from "./memory-distiller.js";
 import { appendMemoryArchive } from "../infra/memory-archive.js";
+import { appendTimelineEvent } from "../domain/work-timeline.js";
+import { syncTasksToTimeline } from "../domain/task-sync.js";
+import { buildWorkHistoryReport, parseHistoryPeriod, isWorkHistoryRequest } from "../domain/work-history.js";
 import { listVisibleDeviceAgents } from "../domain/device-agents.js";
 import { unauthorized } from "../domain/errors.js";
 import { appendAuditEvent } from "../infra/audit.js";
@@ -77,8 +80,21 @@ export async function answerCompanyAssistant({
     truncated: completion.stopReason === "max_tokens",
   });
 
+  const taskTimelineEvents = [];
   const evicted = await store.update((currentState) => {
     persistDiscoveredExternalIds(currentState, context);
+    for (const entry of context.platrum?.userTasks || []) {
+      if (entry?.user?.id && Array.isArray(entry.tasks)) {
+        taskTimelineEvents.push(
+          ...syncTasksToTimeline(currentState, {
+            userId: entry.user.id,
+            tasks: entry.tasks,
+            source: "platrum",
+            now,
+          }),
+        );
+      }
+    }
     appendAuditEvent(currentState, {
       actorUserId: actor.id,
       actorTelegramUserId: actor.telegram?.telegramUserId,
@@ -152,6 +168,44 @@ export async function answerCompanyAssistant({
   });
 
   await archiveEvictedEvents(store, evicted);
+
+  // Record the dialogue into the work timeline (full chronology source of
+  // truth). Fire-and-forget so it never delays the answer.
+  const dataFilePath = store.filePath || null;
+  for (const item of taskTimelineEvents) {
+    void appendTimelineEvent({ dataFilePath, userId: item.userId, event: item.event });
+  }
+  const dialogLinks = {
+    projectIds: context.projects.map((project) => project.id),
+    userIds: context.targetUsers.map((user) => user.id),
+  };
+  void appendTimelineEvent({
+    dataFilePath,
+    userId: actor.id,
+    event: {
+      ts: now.toISOString(),
+      kind: "dialog_question",
+      actorUserId: actor.id,
+      title: trimmedQuestion.slice(0, 200),
+      detail: trimmedQuestion,
+      links: dialogLinks,
+      source: actorUserId ? "local-agent" : "telegram",
+    },
+  });
+  void appendTimelineEvent({
+    dataFilePath,
+    userId: actor.id,
+    event: {
+      ts: now.toISOString(),
+      kind: "dialog_answer",
+      actorUserId: actor.id,
+      title: rendered.plainText.slice(0, 200),
+      detail: rendered.plainText,
+      links: dialogLinks,
+      source: "assistant",
+      metadata: { model: completion.model },
+    },
+  });
 
   if (completion.configured !== false) {
     await distillAssistantMemory({
@@ -427,6 +481,23 @@ export async function buildAssistantContext({
   });
   const recentDeviceCommands = buildRecentDeviceCommandMemory(state, { actor, targetUsers });
 
+  // Work-history: for "what did X do over the period" questions, attach each
+  // target user's full chronology digest from the timeline.
+  let workHistory = null;
+  if (dataFilePath && isWorkHistoryRequest(question)) {
+    const hp = parseHistoryPeriod(question, now);
+    workHistory = { periodLabel: hp.label, from: hp.from, to: hp.to, users: [] };
+    for (const user of targetUsers) {
+      try {
+        workHistory.users.push(
+          await buildWorkHistoryReport({ dataFilePath, user, from: hp.from, to: hp.to, now }),
+        );
+      } catch {
+        // skip on failure, never break the answer
+      }
+    }
+  }
+
   return {
     now: now.toISOString(),
     actor: publicUser(actor),
@@ -445,6 +516,7 @@ export async function buildAssistantContext({
     dailyAssistant,
     memory,
     recentDeviceCommands,
+    workHistory,
   };
 }
 
@@ -1051,6 +1123,7 @@ function buildSystemPrompt() {
     "Личные задачи, личная статистика и эффективность сотрудника считаются ТОЛЬКО по задачам, где этот сотрудник является исполнителем: platrum.userTasks либо задачи проекта с совпадающим assignee (сравни с platrumUserId/platrumUsername из userTasks).",
     "НИКОГДА не приписывай сотруднику задачи с другим исполнителем и не считай из них его эффективность. Если у сотрудника ноль личных задач, прямо скажи об этом; задачи проекта с другими исполнителями упоминай отдельно, называя исполнителя.",
     "Эффективность по задачам считай как completed / total * 100 только из задач, где сотрудник — исполнитель.",
+    "Если в контексте есть context.workHistory — это полная хронология работы сотрудника за период из timeline (диалоги, действия агента, задачи созданы/назначены/завершены, отчёты). Для вопросов вида «что делал(а) за месяц/неделю», «история», «чем занимался» опирайся ПРЕЖДЕ ВСЕГО на workHistory: перечисли реальные события по дням/категориям, сколько задач завершено/поставлено, с кем работал. Не выдумывай — бери факты из workHistory.users[].days и totals.",
     "Не упоминай системные токены, секреты, внутренние webhook-и или пароли.",
     "Never claim that you sent, queued, executed or completed a local device command. Real desktop actions are handled by the server before Claude is called.",
     "Пиши для Telegram: короткий заголовок, затем понятные секции; без Markdown-таблиц, JSON, сырого debug-контекста и непонятных символов.",

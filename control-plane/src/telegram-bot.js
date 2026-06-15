@@ -14,6 +14,8 @@ import { sendDueDailyAssistantMessages } from "./telegram/daily-assistant-report
 import { processTelegramUpdate } from "./telegram/handler.js";
 import { TelegramBotApi } from "./telegram/telegram-api.js";
 import { sendDueTokenUsageReports } from "./telegram/token-usage-reporter.js";
+import { exportObsidianVault } from "./domain/obsidian-export.js";
+import { exportMemoryGraphSite } from "./domain/memory-graph-site.js";
 import { createVoiceServiceFromEnv } from "./integrations/voice-service.js";
 import { runDueMemorySummaries } from "./domain/assistant-summaries.js";
 import { expireStaleAssistantLoops } from "./domain/assistant-open-loops.js";
@@ -43,6 +45,9 @@ let commandsSyncedForToken = null;
 // plenty for daily schedules / token reports / memory summaries.
 const REPORTERS_INTERVAL_MS = Number(process.env.BOT_REPORTERS_INTERVAL_MS || 60000);
 let nextReportersRunAt = 0;
+// Obsidian vault export feeds the web graph showcase; hourly is plenty.
+const VAULT_EXPORT_INTERVAL_MS = Number(process.env.VAULT_EXPORT_INTERVAL_MS || 3600000);
+let nextVaultExportAt = 0;
 
 console.log("telegram bot polling started");
 
@@ -83,6 +88,28 @@ while (true) {
           "memory maintenance failed:",
           error instanceof Error ? error.message : error,
         );
+      }
+      if (process.env.STARLAB_VAULT_DIR && Date.now() >= nextVaultExportAt) {
+        nextVaultExportAt = Date.now() + VAULT_EXPORT_INTERVAL_MS;
+        try {
+          const state = await store.load();
+          const { filesWritten } = await exportObsidianVault({
+            state,
+            dataFilePath: store.filePath,
+            vaultDir: process.env.STARLAB_VAULT_DIR,
+          });
+          console.log(`obsidian vault exported (${filesWritten} files) -> ${process.env.STARLAB_VAULT_DIR}`);
+          if (process.env.STARLAB_GRAPH_SITE_DIR) {
+            const site = await exportMemoryGraphSite({
+              state,
+              dataFilePath: store.filePath,
+              outDir: process.env.STARLAB_GRAPH_SITE_DIR,
+            });
+            console.log(`memory graph site exported (${site.nodes} nodes, ${site.links} links)`);
+          }
+        } catch (error) {
+          console.error("vault export failed:", error instanceof Error ? error.message : error);
+        }
       }
       await sendDueDailyAssistantMessages({
         store,

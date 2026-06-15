@@ -32,6 +32,7 @@ import {
 } from "../domain/assistant-open-loops.js";
 import { buildKickidlerActivitySummary } from "../domain/reports.js";
 import { runAgentTask, makeDeviceCommandRunner, resolveAgentTaskDevice } from "../assistant/agent-loop.js";
+import { appendTimelineEvent } from "../domain/work-timeline.js";
 import {
   buildTokenUsageSummary,
   recordTokenUsageEvents,
@@ -582,6 +583,19 @@ export function createRouter({
           });
           syncDeviceCommandOpenLoop(state, command);
           return { command };
+        });
+        void appendTimelineEvent({
+          dataFilePath: store.filePath || null,
+          userId: result.command.userId,
+          event: {
+            kind: "device_action",
+            actorUserId: result.command.actorUserId,
+            title: `${result.command.type} — ${result.command.status}`,
+            detail: JSON.stringify(result.command.args || {}).slice(0, 500),
+            links: { userIds: [result.command.userId, result.command.actorUserId].filter(Boolean) },
+            source: result.command.source || "device",
+            metadata: { type: result.command.type, status: result.command.status },
+          },
         });
         sendJson(response, 200, { ok: true, data: result });
         return;
