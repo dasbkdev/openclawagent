@@ -8,6 +8,7 @@ export const READ_ONLY_BITRIX_METHODS = Object.freeze([
   "tasks.task.list",
   "task.item.getdata",
   "task.item.list",
+  "task.stages.get",
   "sonet_group.get",
   "socialnetwork.api.workgroup.get",
   "socialnetwork.api.workgroup.list",
@@ -29,6 +30,14 @@ export const READ_ONLY_BITRIX_METHODS = Object.freeze([
 ]);
 
 const READ_ONLY_BITRIX_METHOD_SET = new Set(READ_ONLY_BITRIX_METHODS);
+
+// Workgroup names and kanban-stage (column) titles change rarely but are needed
+// to label every task in the all-boards view. The Bitrix client is constructed
+// per request, so cache these lookups at module scope (keyed by webhook) with a
+// short TTL to avoid dozens of extra REST calls on every assistant question.
+const NAME_CACHE_TTL_MS = 10 * 60 * 1000;
+const workgroupNameCache = new Map(); // webhookUrl -> { at, map }
+const stageNameCache = new Map(); // `${webhookUrl}\n${groupId}` -> { at, map }
 
 export function createBitrixClientFromEnv(env = process.env) {
   if (env.BITRIX_WEBHOOK_URL) {
@@ -73,6 +82,15 @@ export class MockBitrixClient {
       userId: user.id,
       bitrixUserId: user.bitrixUserId ?? null,
       tasks: buildMockTasks({ id: `user-${user.id}`, ownerUserId: user.id }, limit),
+    };
+  }
+
+  async getAllTasks() {
+    return {
+      source: this.source,
+      configured: this.configured,
+      note: "Bitrix is not configured; all-boards task view is unavailable.",
+      tasks: [],
     };
   }
 }
@@ -193,6 +211,127 @@ export class HttpBitrixClient {
       bitrixResolvedByName: Boolean(resolved.resolvedByName),
       tasks: readTasks(payload).slice(0, limit).map(normalizeBitrixTask),
     };
+  }
+
+  /**
+   * Read EVERY task across all Bitrix workgroups and personal kanban boards,
+   * newest-first, regardless of whether the project is mapped in our state.
+   * Each task is labelled with its workgroup name and kanban column (stage)
+   * title. This is the all-boards / kanban view, analogous to Platrum's
+   * getAllTasks — the per-project getProjectTasks only sees mapped groups and
+   * surfaces the oldest tasks first (DEADLINE asc), hiding current work.
+   */
+  async getAllTasks({ limit = 200 } = {}) {
+    const cap = Math.min(Math.max(Number(limit) || 200, 1), 500);
+    const select = [
+      "ID", "TITLE", "GROUP_ID", "STAGE_ID", "STATUS", "DEADLINE",
+      "RESPONSIBLE_ID", "RESPONSIBLE_NAME", "CREATED_BY", "CHANGED_DATE", "CLOSED_DATE",
+    ];
+    const collected = [];
+    let start = 0;
+    // Bitrix returns 50 tasks per page and a `next` offset; page newest-first
+    // until we reach the cap or run out (guard bounds the loop).
+    for (let guard = 0; guard < 20 && collected.length < cap; guard += 1) {
+      const payload = await this.callMethod("tasks.task.list", {
+        order: { CHANGED_DATE: "desc", ID: "desc" },
+        select,
+        start,
+      });
+      const page = readTasks(payload);
+      if (page.length === 0) {
+        break;
+      }
+      collected.push(...page);
+      const next = payload?.next;
+      if (next === undefined || next === null) {
+        break;
+      }
+      start = Number(next);
+    }
+
+    const normalized = collected.slice(0, cap).map(normalizeBitrixTask);
+    const groupNames = await this.loadWorkgroupNames().catch(() => new Map());
+    const stageNames = await this.loadStageNames(normalized).catch(() => new Map());
+
+    const tasks = normalized.map((task) => {
+      const groupKey = task.groupId ? String(task.groupId) : "0";
+      // GROUP_ID 0 (or absent) means the task lives on the user's personal
+      // kanban ("Мой план"), not a workgroup.
+      const isPersonal = groupKey === "0";
+      return {
+        ...task,
+        groupName: isPersonal ? "Личные задачи" : groupNames.get(groupKey) ?? null,
+        stageName: stageNames.get(`${groupKey}:${task.stageId ?? "0"}`) ?? null,
+      };
+    });
+
+    return { source: this.source, configured: this.configured, tasks };
+  }
+
+  async loadWorkgroupNames() {
+    const cached = workgroupNameCache.get(this.webhookUrl);
+    if (cached && Date.now() - cached.at < NAME_CACHE_TTL_MS) {
+      return cached.map;
+    }
+    const payload = await this.callMethod("socialnetwork.api.workgroup.list", {
+      select: ["ID", "NAME"],
+    });
+    const result = payload?.result;
+    const list = Array.isArray(result?.workgroups)
+      ? result.workgroups
+      : Array.isArray(result?.items)
+        ? result.items
+        : Array.isArray(result)
+          ? result
+          : [];
+    const map = new Map();
+    for (const group of list) {
+      const id = group.ID ?? group.id;
+      if (id !== undefined && id !== null) {
+        map.set(String(id), normalizeNullableString(group.NAME ?? group.name));
+      }
+    }
+    workgroupNameCache.set(this.webhookUrl, { at: Date.now(), map });
+    return map;
+  }
+
+  async loadStageNames(tasks) {
+    const groupIds = new Set();
+    for (const task of tasks) {
+      groupIds.add(task.groupId ? String(task.groupId) : "0");
+    }
+    const map = new Map();
+    for (const groupId of groupIds) {
+      const cacheKey = `${this.webhookUrl}\n${groupId}`;
+      const cached = stageNameCache.get(cacheKey);
+      let stageMap;
+      if (cached && Date.now() - cached.at < NAME_CACHE_TTL_MS) {
+        stageMap = cached.map;
+      } else {
+        stageMap = new Map();
+        try {
+          const payload = await this.callMethod("task.stages.get", {
+            entityId: Number(groupId) || 0,
+            isAdmin: "N",
+          });
+          const stages = payload?.result;
+          if (stages && typeof stages === "object") {
+            for (const key of Object.keys(stages)) {
+              const stage = stages[key];
+              const stageId = stage?.ID ?? key;
+              stageMap.set(String(stageId), normalizeNullableString(stage?.TITLE));
+            }
+          }
+        } catch {
+          // Stages may be unavailable for this group — leave column unlabelled.
+        }
+        stageNameCache.set(cacheKey, { at: Date.now(), map: stageMap });
+      }
+      for (const [stageId, title] of stageMap.entries()) {
+        map.set(`${groupId}:${stageId}`, title);
+      }
+    }
+    return map;
   }
 
   async callMethod(method, params) {

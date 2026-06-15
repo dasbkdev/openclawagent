@@ -468,6 +468,7 @@ export async function buildAssistantContext({
   const platrum = await readPlatrumContext({ projects, targetUsers, period, platrumClient });
   const bitrix = await readBitrixContext({ projects, bitrixClient });
   const bitrixUserTasks = await readBitrixUserTasksContext({ targetUsers, bitrixClient });
+  const bitrixBoardTasks = await readBitrixBoardTasksContext({ bitrixClient });
   const googleContextUsers = resolveGoogleContextUsers({ targetUsers, accessibleUsers, question });
   const calendarSearchTerms = buildCalendarSearchTerms({ question, targetUsers, visibleDevices });
   const googleWorkspace = await readGoogleWorkspaceContext({
@@ -520,6 +521,7 @@ export async function buildAssistantContext({
     platrum,
     bitrix,
     bitrixUserTasks,
+    bitrixBoardTasks,
     calendarSearchTerms,
     googleWorkspace,
     dailyAssistant,
@@ -934,6 +936,40 @@ async function readBitrixUserTasksContext({ targetUsers, bitrixClient }) {
   return reports;
 }
 
+// Board/kanban-centric view of EVERY Bitrix task across ALL workgroups and
+// personal kanban boards (group 0 = "Личные задачи"), newest-first — including
+// groups that have no project mapping in our state and are therefore invisible
+// to readBitrixContext. Tasks are grouped by workgroup with their kanban column
+// (stageName). This is the full, current Bitrix task picture.
+async function readBitrixBoardTasksContext({ bitrixClient }) {
+  if (!bitrixClient?.getAllTasks) {
+    return [];
+  }
+  try {
+    const all = await bitrixClient.getAllTasks({ limit: 200 });
+    const tasks = (all.tasks || []).map((task) => ({ ...task, overdue: isTaskOverdue(task) }));
+    const groups = new Map();
+    for (const task of tasks) {
+      const key = task.groupId ? String(task.groupId) : "0";
+      if (!groups.has(key)) {
+        groups.set(key, {
+          groupId: task.groupId ?? null,
+          groupName: task.groupName ?? null,
+          tasks: [],
+        });
+      }
+      groups.get(key).tasks.push(task);
+    }
+    return [...groups.values()].map((group) => ({
+      ...group,
+      summary: summarizeTasks(group.tasks),
+      tasks: group.tasks.slice(0, MAX_TASKS_PER_PROJECT),
+    }));
+  } catch (error) {
+    return [{ error: error instanceof Error ? error.message : String(error), tasks: [] }];
+  }
+}
+
 function resolveGoogleContextUsers({ targetUsers, accessibleUsers, question }) {
   const selected = [];
   const addUser = (user) => {
@@ -1223,7 +1259,8 @@ function buildSystemPrompt() {
     "Пиши для Telegram: короткий заголовок, затем понятные секции; без Markdown-таблиц, JSON, сырого debug-контекста и непонятных символов.",
     "Каждый ответ должен быть полезным руководителю или сотруднику: сначала вывод, затем факты, затем что проверить дальше.",
     "When Bitrix project tasks are empty, also check bitrixUserTasks. User-assigned tasks can be personal or in a different workgroup.",
-    "For task and project questions, prefer platrum.userTasks and platrum.projectTasks over Bitrix.",
+    "context.bitrixBoardTasks — это ВСЕ задачи Bitrix со ВСЕХ рабочих групп и канбан-досок (включая личные задачи group 0 = «Личные задачи»), отсортированные по свежести, с именем группы (groupName) и колонкой канбана (stageName). Для вопросов «покажи все задачи по Bitrix», «что в работе», «задачи на канбане», «текущие задачи команды» используй bitrixBoardTasks, а НЕ context.bitrix (там только пара legacy-проектов, отсортированных по старым дедлайнам). bitrix и bitrixUserTasks оставлены как fallback.",
+    "For task and project questions, prefer platrum.userTasks and platrum.projectTasks over Bitrix. When the user explicitly asks about Bitrix tasks/kanban, use bitrixBoardTasks for the full current picture.",
     "For employee work schedules and calendar summaries, first check googleWorkspace.users[].sharedCalendars. These are Google 'Other calendars' from connected PM accounts.",
     "",
     "RESPONSE FORMAT (strict): Reply with ONLY a single JSON object, no markdown, no code fences, no extra prose before or after it.",

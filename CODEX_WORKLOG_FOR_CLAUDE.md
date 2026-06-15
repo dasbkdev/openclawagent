@@ -8919,3 +8919,33 @@ Two user-reported gaps.
    the "Примерная стоимость" line is hidden. Could estimate $ from model+tokens.
 
 Tests: 250 pass. Deployed 6926781.
+
+## 2026-06-15 - Bitrix kanban / all-boards tasks (same fix as Platrum)
+
+User: the bot pulls OLD Bitrix tasks; Bitrix also has a kanban to read from.
+
+Root cause (found by live read-only probe of the webhook): Bitrix has 899 tasks
+across 27 workgroups, but the bot only read tasks for projects that have a
+bitrixGroupId mapping in our state (a couple of legacy groups) AND ordered them
+DEADLINE asc -> oldest/overdue first, limit cuts off fresh work. Current work
+lives on unmapped workgroup kanbans (gr.99 "Сайт анализа звонков", gr.69 "ИИ
+чат-бот", gr.57 "Платрум + ДТМ") and personal kanban (GROUP_ID 0 = "Мой план").
+Directly analogous to the Platrum personal-boards gap.
+
+Fix:
+- bitrix-client.js: added task.stages.get to the read-only allowlist; added
+  HttpBitrixClient.getAllTasks({limit}) -> pages tasks.task.list with NO group
+  filter, CHANGED_DATE desc (newest first), labels each task with workgroup name
+  (socialnetwork.api.workgroup.list) and kanban column title (task.stages.get
+  per group). Group/stage names cached at module scope (10-min TTL) since the
+  client is constructed per request. GROUP_ID 0 -> "Личные задачи". Mock client
+  getAllTasks() is a safe no-op.
+- company-assistant.js: new readBitrixBoardTasksContext grouping every task by
+  workgroup with kanban column + summary; added context.bitrixBoardTasks (always
+  built, error-safe). Guidance updated: use bitrixBoardTasks for "all Bitrix
+  tasks / kanban / current team tasks"; context.bitrix kept as legacy fallback.
+- scripts/linux/probe-bitrix.mjs: throwaway read-only diagnostic (no secrets
+  printed).
+
+Tests: 253 pass (+3 in test/bitrix-board-tasks.test.js). All integrations remain
+read-only.
