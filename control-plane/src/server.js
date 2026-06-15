@@ -10,7 +10,7 @@ import { createGoogleOAuthService } from "./integrations/google-oauth.js";
 import { createVoiceServiceFromEnv } from "./integrations/voice-service.js";
 import { loadEnvFile } from "./infra/env.js";
 import { createInitialState } from "./infra/seed.js";
-import { JsonStore, resolveDefaultDataFile } from "./infra/json-store.js";
+import { createStore } from "./infra/store-factory.js";
 import { createSetupService } from "./setup/setup-service.js";
 import { TelegramBotApi } from "./telegram/telegram-api.js";
 
@@ -23,7 +23,7 @@ await setupService.applyToEnv();
 const port = Number(process.env.PORT || 3099);
 const host = process.env.HOST || "127.0.0.1";
 
-const store = new JsonStore(resolveDefaultDataFile(projectRoot), () => createInitialState());
+const store = await createStore({ projectRoot, seedFactory: () => createInitialState() });
 const getKickidlerClient = async () => {
   await setupService.applyToEnv(process.env, { overwrite: true });
   return createKickidlerClientFromEnv(process.env, {

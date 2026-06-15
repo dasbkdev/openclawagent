@@ -7,7 +7,7 @@ import { createPlatrumClientFromEnv } from "./connectors/platrum-client.js";
 import { createGoogleOAuthService } from "./integrations/google-oauth.js";
 import { loadEnvFile } from "./infra/env.js";
 import { createInitialState } from "./infra/seed.js";
-import { JsonStore, resolveDefaultDataFile } from "./infra/json-store.js";
+import { createStore } from "./infra/store-factory.js";
 import { createSetupService } from "./setup/setup-service.js";
 import { TELEGRAM_BOT_COMMANDS } from "./telegram/bot-commands.js";
 import { sendDueDailyAssistantMessages } from "./telegram/daily-assistant-reporter.js";
@@ -26,7 +26,7 @@ loadEnvFile({ projectRoot });
 const setupService = createSetupService({ projectRoot });
 await setupService.applyToEnv();
 
-const store = new JsonStore(resolveDefaultDataFile(projectRoot), () => createInitialState());
+const store = await createStore({ projectRoot, seedFactory: () => createInitialState() });
 const googleOAuthService = createGoogleOAuthService({ setupService });
 const createMetriconClient = async () => {
   await setupService.applyToEnv(process.env, { overwrite: true });
