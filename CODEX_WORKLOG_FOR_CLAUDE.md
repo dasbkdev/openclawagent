@@ -8808,3 +8808,41 @@ User approved fixing weak points 1,2,3,5,6,7 (skip 4). Decided NOT to add Redis
 ### Verification
 - Local + server (via git deploy) npm test: 233 passed, 0 failed. Services
   active. Deploy now one command: `bash .../scripts/linux/deploy-from-git.sh`.
+
+## 2026-06-15 - Open any site, close any app, close tab, minimize
+
+User: assistant should open ANY website, close/minimize ANY app, and close
+browser tabs.
+
+### Server-side (instant — works on the CURRENT agent, no rebuild)
+- `natural-device-actions.js` parser rewritten:
+  - Open any website: bare-domain detection ("открой example.com"), known
+    sites by name (facebook/instagram/vk/gmail/google/x/github/chatgpt/…),
+    and "открой сайт X" → domain guess. open_url uses shell.openExternal,
+    which already opens any URL.
+  - Close/open ANY app: known alias first, then a free-form app name after the
+    verb ("закрой Spotify", "открой Postman") — closeApp uses taskkill which
+    resolves the image name.
+  - Close browser tab: "закрой вкладку" → hotkey Ctrl+W (works on current
+    agent's SendKeys).
+  - Guards against hijacking questions/chat (rejects "как дела", "что ты
+    умеешь?", long sentences).
+- Fixed Cyrillic \b issue in the "all windows" matcher (same JS-regex gotcha
+  as months).
+- LIVE verified: open_url https://example.com queued to user's device →
+  succeeded.
+
+### Needs the updated agent (minimize)
+- Win32 SendKeys cannot do Win+Down, so minimize is a NATIVE action:
+  - `minimize_window` → ShowWindow(GetForegroundWindow, SW_MINIMIZE) via
+    PowerShell; `minimize_all` → Shell.Application MinimizeAll.
+  - Added to openclaw-starlab windows agent (handler + DEVICE_CAPABILITIES)
+    and our executor.js (+ PLATFORM_ACTIONS). New action types added to
+    `device-agents.js` DEVICE_ACTION_TYPES.
+- "сверни …" is recognised now, but the current installed agent (2026.6.7)
+  doesn't advertise minimize_* yet, so the server won't queue it until the
+  agent is rebuilt/updated. Open-site / close-app / close-tab work today.
+
+### Verification
+- Local + server (git deploy) npm test: 242 passed, 0 failed.
+- Deployed via the new git deploy script (one command).
