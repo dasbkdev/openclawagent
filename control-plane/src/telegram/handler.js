@@ -38,6 +38,7 @@ import {
 } from "../domain/invite-codes.js";
 import { autoResolveUserMappings } from "../domain/external-mapping.js";
 import { runAgentTask, makeDeviceCommandRunner, resolveAgentTaskDevice } from "../assistant/agent-loop.js";
+import { createBrowserClientFromEnv } from "../integrations/browser-client.js";
 import {
   formatNaturalDeviceCommandQueued,
   tryCreateNaturalDeviceCommand,
@@ -809,6 +810,7 @@ async function runAgentTaskCommand({ store, telegram, chatId, telegramUserId, cl
     device,
     instruction: trimmed,
     enqueueAndWait,
+    browserClient: createBrowserClientFromEnv(),
   });
 
   const lines = [title(outcome.ok ? "Задача выполнена" : "Задача завершена")];

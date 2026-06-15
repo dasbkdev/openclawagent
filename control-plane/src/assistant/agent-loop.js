@@ -81,6 +81,34 @@ export const DEVICE_TOOL_SCHEMAS = Object.freeze([
   }, ["query"]),
 ]);
 
+const BROWSE_WEB_TOOL = tool(
+  "browse_web",
+  "Управлять браузером на сервере как человек: открыть сайт и выполнить шаги (клик, ввод текста, чтение, скриншот). Используй для задач «зайди на сайт и …», когда нужно реально взаимодействовать со страницей (формы, поиск на сайте, чтение динамического контента). Для простого вопроса «найди информацию» это не нужно — поиск делается отдельно.",
+  {
+    url: { type: "string", description: "Стартовый URL (http/https)." },
+    steps: {
+      type: "array",
+      description: "Последовательность действий на странице.",
+      items: {
+        type: "object",
+        properties: {
+          action: { type: "string", description: "goto | click | type | press | wait | extract_text | extract_links | screenshot | scroll | select" },
+          selector: { type: "string", description: "CSS-селектор (для click/type/extract_text/select)." },
+          text: { type: "string", description: "Текст для type или текст ссылки/кнопки для click." },
+          url: { type: "string", description: "URL для action=goto." },
+          value: { type: "string", description: "Значение для select." },
+          key: { type: "string", description: "Клавиша для press (напр. Enter)." },
+          ms: { type: "number", description: "Пауза в мс для wait." },
+          submit: { type: "boolean", description: "Нажать Enter после type." },
+        },
+        required: ["action"],
+      },
+    },
+    returnText: { type: "boolean", description: "Вернуть видимый текст страницы (по умолчанию да)." },
+  },
+  ["url"],
+);
+
 const FINISH_TOOL = tool(
   "finish_task",
   "Заверши задачу: вызови, когда цель достигнута или дальше двигаться невозможно. Подведи итог для сотрудника.",
@@ -108,6 +136,7 @@ export async function runAgentTask({
   device,
   instruction,
   enqueueAndWait,
+  browserClient = null,
   maxSteps = DEFAULT_MAX_STEPS,
   onProgress = () => {},
   now = new Date(),
@@ -126,7 +155,8 @@ export async function runAgentTask({
     DEVICE_ACTION_TYPES.includes(schema.name) &&
     (capabilities.size === 0 || capabilities.has(schema.name)),
   );
-  const tools = [...availableTools, FINISH_TOOL];
+  const browserEnabled = Boolean(browserClient?.configured);
+  const tools = [...availableTools, ...(browserEnabled ? [BROWSE_WEB_TOOL] : []), FINISH_TOOL];
 
   const messages = [{ role: "user", content: trimmed }];
   const steps = [];
@@ -175,6 +205,18 @@ export async function runAgentTask({
       const type = toolUse.name;
       const args = toolUse.input || {};
       onProgress({ kind: "step", type, args, index: steps.length + 1 });
+
+      // Browser automation runs server-side via the browser-service, not on
+      // the employee's device queue.
+      if (type === "browse_web") {
+        const browseOutcome = await runBrowseWeb(browserClient, args);
+        steps.push({ type, args: redactArgs(args), status: browseOutcome.status, sensitive: false });
+        onProgress({ kind: "result", type, status: browseOutcome.status });
+        toolResults.push(
+          toolResultBlock(toolUse.id, browseOutcome.content, browseOutcome.status !== "succeeded"),
+        );
+        continue;
+      }
 
       let outcome;
       try {
@@ -298,6 +340,31 @@ export function makeDeviceCommandRunner({ store, actor, device, timeoutMs = DEFA
     }
     return { status: "failed", error: "device did not respond in time" };
   };
+}
+
+async function runBrowseWeb(browserClient, args) {
+  try {
+    const result = await browserClient.run({
+      url: args.url,
+      steps: Array.isArray(args.steps) ? args.steps : [],
+      returnText: args.returnText !== false,
+      screenshot: false,
+    });
+    if (!result?.ok) {
+      return { status: "failed", content: `Не удалось открыть страницу: ${result?.error || "ошибка браузера"}` };
+    }
+    const parts = [];
+    if (result.finalUrl) parts.push(`URL: ${result.finalUrl}`);
+    if (result.title) parts.push(`Заголовок: ${result.title}`);
+    const stepLines = (result.steps || [])
+      .map((s) => `${s.action}: ${s.status}${s.value ? ` → ${String(s.value).slice(0, 800)}` : ""}${s.error ? ` (${s.error})` : ""}`)
+      .join("\n");
+    if (stepLines) parts.push(`Шаги:\n${stepLines}`);
+    if (result.text) parts.push(`Текст страницы:\n${String(result.text).slice(0, 6000)}`);
+    return { status: "succeeded", content: parts.join("\n\n").slice(0, 8000) || "Готово." };
+  } catch (error) {
+    return { status: "failed", content: `Ошибка браузера: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }
 
 export function resolveAgentTaskDevice(state, actor, body) {

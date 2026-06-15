@@ -33,6 +33,7 @@ import {
 import { buildKickidlerActivitySummary } from "../domain/reports.js";
 import { runAgentTask, makeDeviceCommandRunner, resolveAgentTaskDevice } from "../assistant/agent-loop.js";
 import { appendTimelineEvent } from "../domain/work-timeline.js";
+import { createBrowserClientFromEnv } from "../integrations/browser-client.js";
 import {
   buildTokenUsageSummary,
   recordTokenUsageEvents,
@@ -706,6 +707,7 @@ export function createRouter({
           device,
           instruction: body.instruction || body.text,
           enqueueAndWait,
+          browserClient: createBrowserClientFromEnv(),
           maxSteps: Number(body.maxSteps) || undefined,
         });
         sendJson(response, 200, { ok: true, data: outcome });

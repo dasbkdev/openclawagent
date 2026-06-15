@@ -8696,3 +8696,49 @@ natural device command → assistant. Non-matches fall through safely (e.g.
 ### Verification
 - Local + server npm test: 225 passed, 0 failed (+ natural-plan tests).
 - Services active, logs clean.
+
+## 2026-06-15 - Internet for the assistant: web search + Playwright browser
+
+User: assistant should surf the internet, search for info, use a browser like a
+human. Built two layers via orchestration (Architect + Opus sub-agent for the
+browser service).
+
+### Layer 1 - Web search (server-side, in control-plane)
+- `claude-client.js`: `researchWeb()` uses Anthropic server-side tools
+  `web_search_20260209` + `web_fetch_20260209` (supported on sonnet-4-6),
+  loops on `pause_turn`, returns answer text + `extractWebSources()` (urls).
+  `MissingClaudeClient` stubbed.
+- `company-assistant.js`: `isWebResearchQuery()` detects current-info intent
+  (news, prices, weather, "найди в интернете"…); `readWebResearchContext()`
+  runs web research and attaches `context.webResearch` {summary, sources};
+  system prompt instructs Claude to ground on it and cite sources. Gated by
+  `WEB_SEARCH_ENABLED` (default on) + Claude configured; fail-safe.
+- LIVE verified on production: "курс доллара к сому" returned a real rate with
+  10 sources (akchabar, NBKR, investing…).
+
+### Layer 2 - Playwright browser service (isolated microservice)
+- New `control-plane/browser-service/` (own package.json, dep playwright) — NOT
+  in control-plane (which stays zero-dep). HTTP service on 127.0.0.1:3210,
+  `X-Browser-Token` auth. Actions: goto/click/type/press/wait/extract_text/
+  extract_links/screenshot/scroll/select. Security: localhost-only, http(s)
+  goto only, no arbitrary JS, downloads blocked, timeouts, size caps. 24 pure
+  tests (no Chromium needed).
+- `src/integrations/browser-client.js`: zero-dep fetch client (fail-safe).
+- `agent-loop.js`: new `browse_web` tool exposed when browser client is
+  configured; executed server-side via the browser client (not the device
+  queue). So `/task зайди на сайт и …` can really drive a browser.
+- Deployed: installed Chromium + OS deps on server
+  (`npx playwright install chromium --with-deps`), systemd unit
+  `starlab-browser-service.service` (port 3210, random token), browser env
+  added to control-plane. LIVE verified: browsed example.com, extracted title
+  and text through real headless Chromium.
+
+### Verification
+- Local + server `npm test`: 233 passed, 0 failed (+ web-research, browser
+  tests). Browser-service: 24 passed. All services active.
+
+### Notes
+- Web search is metered (billed per search) — runs only on internet-intent
+  questions by default.
+- Browser automation surfaces through the `/task` planner (agent-loop); the
+  assistant uses `browse_web` when a task needs real page interaction.
