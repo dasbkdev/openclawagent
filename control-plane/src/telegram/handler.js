@@ -25,6 +25,17 @@ import {
   isGenericDoneReference,
 } from "../domain/natural-plan-actions.js";
 import {
+  parseRelayIntent,
+  splitRecipientAndBody,
+  canBroadcast,
+  listBroadcastRecipients,
+  setPendingBroadcast,
+  takePendingBroadcast,
+  peekPendingBroadcast,
+  isAffirmative,
+  isNegative,
+} from "../domain/user-messaging.js";
+import {
   createDeviceCommand,
   listVisibleDeviceAgents,
   listVisibleDeviceCommands,
@@ -135,6 +146,10 @@ export async function handleTelegramMessage({
     if (voiceReplyRequested && command.raw.startsWith("/")) {
       command = stripVoiceDirectiveFromCommand(command);
     }
+
+    // Raw client (no voice wrapping) for delivering to OTHER users' chats —
+    // a relay/broadcast recipient must not get the sender's TTS.
+    const directTelegram = telegram;
 
     telegram = createVoiceAwareTelegram({
       telegram,
@@ -434,6 +449,22 @@ export async function handleTelegramMessage({
 
       default:
         if (command.raw && !command.raw.startsWith("/")) {
+          // "да"/"нет" answering a pending broadcast confirmation.
+          const handledBroadcastConfirm = await maybePendingBroadcastConfirm({
+            store, telegram, directTelegram, chatId, telegramUserId, text: command.raw, now,
+          });
+          if (handledBroadcastConfirm) {
+            return;
+          }
+
+          // "Сообщи Бегайым …" / "Отправь всем …" — relay a message to colleagues.
+          const handledRelay = await maybeRelayMessage({
+            store, telegram, directTelegram, chatId, telegramUserId, text: command.raw, now,
+          });
+          if (handledRelay) {
+            return;
+          }
+
           const handledPlanCreate = await maybeCreateNaturalPlan({
             store, telegram, chatId, telegramUserId, text: command.raw, now,
           });
@@ -1174,6 +1205,175 @@ async function maybeMarkNaturalDone({ store, telegram, chatId, telegramUserId, t
     return true;
   }
   return false;
+}
+
+async function maybeRelayMessage({ store, telegram, directTelegram, chatId, telegramUserId, text, now }) {
+  const intent = parseRelayIntent(text);
+  if (!intent) {
+    return false;
+  }
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  if (!actor) {
+    return false; // unregistered sender — let the normal flow respond
+  }
+  const senderName = actor.displayName || actor.telegram?.firstName || "Коллега";
+
+  if (intent.kind === "broadcast") {
+    if (!canBroadcast(actor)) {
+      await telegram.sendMessage({
+        chatId,
+        text: "Рассылку всем сотрудникам может делать только руководитель (OWNER или SENIOR_PM). Личное сообщение доступно всем: «сообщи <имя> <текст>».",
+      });
+      return true;
+    }
+    const body = String(intent.body || "").trim();
+    if (!body) {
+      await telegram.sendMessage({ chatId, text: "Что отправить всем сотрудникам? Напишите: «отправь всем <текст>»." });
+      return true;
+    }
+    const recipients = listBroadcastRecipients(state, telegramUserId);
+    if (recipients.length === 0) {
+      await telegram.sendMessage({ chatId, text: "Пока некому отправлять: ни у кого из сотрудников не привязан Telegram-бот." });
+      return true;
+    }
+    await store.update((s) => {
+      setPendingBroadcast(s, telegramUserId, body, now);
+    });
+    await telegram.sendMessage({
+      chatId,
+      text: [
+        title("Подтвердите рассылку"),
+        `Отправить ВСЕМ сотрудникам (${recipients.length} чел.):`,
+        "",
+        body,
+        "",
+        "Ответьте «да» — отправлю, «нет» — отменю.",
+      ].join("\n"),
+    });
+    return true;
+  }
+
+  const { res, body } = splitRecipientAndBody(state, intent.remainder);
+  if (res.status === "not_found" || res.status === "empty") {
+    if (intent.weak) {
+      return false; // "отправь/перешли …" without a known recipient — not a relay
+    }
+    await telegram.sendMessage({
+      chatId,
+      text: "Не нашёл, кому отправить. Укажите имя сотрудника: «сообщи <имя> <текст>». Список — /users.",
+    });
+    return true;
+  }
+  if (res.status === "ambiguous") {
+    const names = res.users.map((u) => u.displayName || u.id).join(", ");
+    await telegram.sendMessage({ chatId, text: `Несколько сотрудников подходят: ${names}. Уточните имя.` });
+    return true;
+  }
+  if (res.status === "not_linked") {
+    await telegram.sendMessage({
+      chatId,
+      text: `${res.user.displayName || "Этот сотрудник"} ещё не привязал(а) Telegram-бота, поэтому отправить нельзя.`,
+    });
+    return true;
+  }
+  if (!body) {
+    await telegram.sendMessage({
+      chatId,
+      text: `Что передать ${res.user.displayName || "сотруднику"}? Напишите: «сообщи ${res.user.displayName || "имя"} <текст>».`,
+    });
+    return true;
+  }
+
+  const recipient = res.user;
+  try {
+    await directTelegram.sendMessage({
+      chatId: recipient.telegram.telegramUserId,
+      text: [`📨 Сообщение от ${senderName}:`, "", body].join("\n"),
+    });
+  } catch {
+    await telegram.sendMessage({
+      chatId,
+      text: `Не удалось доставить сообщение ${recipient.displayName || "сотруднику"} — возможно, бот остановлен у получателя.`,
+    });
+    return true;
+  }
+
+  await store.update((s) => {
+    const sender = resolveActorByTelegramId(s, telegramUserId);
+    recordAssistantMemoryEvent(s, {
+      userId: sender?.id,
+      channel: "telegram",
+      role: "user",
+      kind: "user_message_relay",
+      text,
+      target: { userId: recipient.id },
+      metadata: { recipientId: recipient.id },
+      now,
+    });
+  });
+
+  await telegram.sendMessage({ chatId, text: `Отправил ${recipient.displayName || "сотруднику"}: «${body}»` });
+  return true;
+}
+
+async function maybePendingBroadcastConfirm({ store, telegram, directTelegram, chatId, telegramUserId, text, now }) {
+  const peeked = await store.load();
+  if (!peekPendingBroadcast(peeked, telegramUserId)) {
+    return false;
+  }
+  if (isNegative(text)) {
+    await store.update((s) => takePendingBroadcast(s, telegramUserId, now));
+    await telegram.sendMessage({ chatId, text: "Рассылка отменена." });
+    return true;
+  }
+  if (!isAffirmative(text)) {
+    return false; // not a yes/no — let normal flow handle; pending expires by TTL
+  }
+
+  const pending = await store.update((s) => takePendingBroadcast(s, telegramUserId, now));
+  if (!pending) {
+    await telegram.sendMessage({ chatId, text: "Запрос на рассылку истёк — повторите команду." });
+    return true;
+  }
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  if (!canBroadcast(actor)) {
+    await telegram.sendMessage({ chatId, text: "Рассылку всем может делать только руководитель." });
+    return true;
+  }
+  const senderName = actor?.displayName || actor?.telegram?.firstName || "Руководитель";
+  const recipients = listBroadcastRecipients(state, telegramUserId);
+  let delivered = 0;
+  let failed = 0;
+  for (const recipient of recipients) {
+    try {
+      await directTelegram.sendMessage({
+        chatId: recipient.telegram.telegramUserId,
+        text: [`📢 Сообщение всем сотрудникам от ${senderName}:`, "", pending.body].join("\n"),
+      });
+      delivered += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  await store.update((s) => {
+    const sender = resolveActorByTelegramId(s, telegramUserId);
+    recordAssistantMemoryEvent(s, {
+      userId: sender?.id,
+      channel: "telegram",
+      role: "user",
+      kind: "user_message_broadcast",
+      text: pending.body,
+      metadata: { delivered, failed },
+      now,
+    });
+  });
+  await telegram.sendMessage({
+    chatId,
+    text: `Разослал ${delivered} сотрудникам${failed ? `, не доставлено ${failed}` : ""}.`,
+  });
+  return true;
 }
 
 async function sendDailyProgress({ store, telegram, chatId, telegramUserId, kickidlerClient, bitrixClient, platrumClient, target, now }) {

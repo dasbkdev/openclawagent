@@ -9035,3 +9035,29 @@ maybeMarkNaturalDone now guides the user instead of silently falling through:
 - plan exists but item unclear -> list the open items and ask which (keyword or
   /done N).
 Tests still 261 (handler is integration-level; the parse/match units are covered).
+
+## 2026-06-16 - Employee-to-employee messaging via the bot (stage 1: text)
+
+User wants Nikolay's agent to message subordinates ("Сообщи Бегайым что собрание
+в 14:00") delivered to their bot, bidirectionally for everyone, plus broadcast to
+all and (stage 2) media handling. Decisions: single DM sends immediately;
+broadcast to all is OWNER/SENIOR_PM only and confirmed; video -> try to analyze
+(stage 2).
+
+Stage 1 (text) implemented:
+- domain/user-messaging.js (pure): parseRelayIntent (relay vs broadcast; "отправь/
+  перешли" are weak verbs that only relay when a recipient resolves), recipient
+  resolution by displayName/telegram username+name/platrum username,
+  splitRecipientAndBody, broadcast permission + pending-broadcast state (5-min
+  TTL) + да/нет detection. Delivery is DM to the recipient's private chat
+  (chat_id == telegram.telegramUserId).
+- handler.js: maybeRelayMessage + maybePendingBroadcastConfirm wired into the
+  free-text branch BEFORE plan/done. Recipients are messaged with the RAW
+  telegram client (captured before voice wrapping) so they never get the
+  sender's TTS. Single DM is immediate; broadcast asks да/нет then sends to all
+  linked users (excluding sender), reporting delivered/failed.
+- Note: only employees who linked Telegram (via invite) can receive.
+- Tests: 269 pass (+8 user-messaging.test.js).
+
+Stage 2 (incoming media: forward + Claude vision for images/PDF + video->audio->
+STT) still to do.
