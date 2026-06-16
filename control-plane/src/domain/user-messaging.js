@@ -14,11 +14,22 @@ import { Roles } from "./roles.js";
 
 // Note: JS \b is ASCII-only, so it does not work after Cyrillic letters —
 // require an explicit separator after the verb / target instead.
-const RELAY_VERB = /^\s*(сообщи(?:те)?|напиши(?:те)?|передай(?:те)?|скажи(?:те)?|отправь(?:те)?|перешли(?:те)?|пиши)[\s,:—-]+(.+)$/isu;
+const RELAY_VERB = /^\s*(сообщи(?:те)?|напиши(?:те)?|передай(?:те)?|скажи(?:те)?|отправь(?:те)?|перешли(?:те)?|пиши|уведоми(?:ть|те)?|оповести(?:ть|те)?|напомни(?:ть|те)?)[\s,:—-]+(.+)$/isu;
 const BROADCAST_TARGET = /^(всем(?:\s+сотрудникам|\s+коллегам|\s+в\s+команде)?|все(?:\s+сотрудники)?|команде|всей\s+команде|каждому)(?:[\s,:—-]+(?:что\s+|чтобы\s+|о\s+том,?\s+что\s+|про\s+то,?\s+что\s+)?(.*))?$/isu;
 const LEADING_CONNECTOR = /^\s*(?:что|чтобы|о\s+том,?\s+что|про\s+то,?\s+что|следующее|такое)[\s,:—-]+/iu;
-// Words that may precede the recipient name in a forward ("отправь это Бегайым").
-const LEADING_OBJECT = /^\s*(?:это|этот|эту|эти|вот\s+это|файл|документ|картинку|фото|изображение|видео|его|её|ее)\s+/iu;
+// Filler words that may sit between the verb and the recipient name, e.g.
+// "отправь сообщение агенту Бегайым …" / "напиши сотруднику Айзирек …".
+const LEADING_FILLER = /^(?:сообщени[еяю]|сообщенье|смс|уведомлени[еяю]|месседж|весточк[ауи]|агенту|сотруднику|коллеге|товарищу|для|это|этот|эту|эти|вот|файл|документ|картинку|фото|изображение|видео|его|её|ее)(?:[\s,:—-]+|$)/iu;
+
+function stripLeadingFiller(text) {
+  let value = String(text || "").trim();
+  let previous;
+  do {
+    previous = value;
+    value = value.replace(LEADING_FILLER, "").trim();
+  } while (value !== previous && value.length > 0);
+  return value;
+}
 
 const AFFIRMATIVE = /^\s*(да|ага|давай|давайте|подтверждаю|подтвердить|ок|окей|окай|yes|y|отправляй|отправляйте|отправь|отправить|шли|шлите)\s*[.!]*\s*$/iu;
 const NEGATIVE = /^\s*(нет|не\s+надо|отмена|отменить|отмени|стоп|cancel|no|n)\s*[.!]*\s*$/iu;
@@ -59,7 +70,7 @@ export function parseRelayIntent(text) {
   // "отправь"/"перешли" are also used for files and device actions, so they are
   // "weak": the handler only treats them as a relay when a recipient resolves.
   const weak = /^(отправь|перешли)/iu.test(m[1]);
-  return { kind: "relay", remainder: rest.replace(LEADING_OBJECT, "").trim(), weak };
+  return { kind: "relay", remainder: stripLeadingFiller(rest), weak };
 }
 
 export function messagingAliases(user) {

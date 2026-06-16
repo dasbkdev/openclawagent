@@ -50,6 +50,25 @@ test("splitRecipientAndBody resolves the name and keeps the body", () => {
   assert.equal(body, "будет собрание в 14:00");
 });
 
+test("parseRelayIntent strips filler words and supports more verbs", () => {
+  assert.equal(
+    parseRelayIntent("отправь сообщение агенту Бегайым о том что завтра собрание в 13:00").remainder,
+    "Бегайым о том что завтра собрание в 13:00",
+  );
+  assert.equal(parseRelayIntent("уведоми Бегайым что завтра собрание").kind, "relay");
+  assert.equal(parseRelayIntent("напомни Айзирек про отчёт").kind, "relay");
+  assert.equal(parseRelayIntent("напиши сотруднику Перизат привет").remainder.startsWith("Перизат"), true);
+});
+
+test("full meeting relay: filler + connector stripped, body is clean", () => {
+  const state = sampleState();
+  const intent = parseRelayIntent("отправь сообщение агенту Бегайым о том что завтра собрание в 13:00");
+  const { res, body } = splitRecipientAndBody(state, intent.remainder);
+  assert.equal(res.status, "ok");
+  assert.equal(res.user.id, "u-begaiym");
+  assert.equal(body, "завтра собрание в 13:00");
+});
+
 test("resolveMessageRecipient reports not linked and not found", () => {
   const state = sampleState();
   assert.equal(resolveMessageRecipient(state, "Нур").status, "not_linked");
