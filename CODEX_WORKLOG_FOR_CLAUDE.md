@@ -9002,3 +9002,26 @@ Fix: stop letting the model compute weekdays.
   days[].dayName; weekStart is always Monday; a day with mode!=day_off/isOff=false
   is a working day, don't reclassify it as выходной.
 - Tests: 259 pass (+1). Verified live: dayName 06-15->Пн, 06-16->Вт.
+
+## 2026-06-16 - Natural-language task completion (more words + smarter match)
+
+User: the assistant only completes a task on the exact word "done/завершено";
+make natural phrasings work ("собрание с командой завершена" etc.).
+
+Scope note: this completes DAILY PLAN items (the bot's own plan state) — Platrum/
+Bitrix tasks stay read-only per the hard rules, so "complete a task" = mark a
+план-дня item done. The natural-done path already existed (parseNaturalDoneIntent
+-> matchPlanItemByPhrase -> markDailyPlanItemDone); it was too narrow.
+
+Changes (natural-plan-actions.js + handler.js):
+- Broadened DONE_VERBS: added завершена/завершить, закрыт(а/о/ы), сдал/сдан,
+  доделал/доделан, дописал, сделано/сделана, complete/finish/closed/ready. Added
+  the same forms to the stop-word list so they don't pollute keyword matching.
+- New isGenericDoneReference(): true when the phrase has no concrete subject
+  ("готово", "задачу закрыл"). Handler now completes the single remaining open
+  plan item on a generic confirmation; a phrase that NAMES something
+  ("собрание завершено") still requires a real keyword match, so we never
+  complete the wrong item.
+- Tests: 261 pass (+2).
+
+Assistant model: claude-sonnet-4-6 (forced by claude-model-policy applyToEnv).

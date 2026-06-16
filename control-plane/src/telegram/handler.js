@@ -22,6 +22,7 @@ import {
   parseNaturalPlanIntent,
   parseNaturalDoneIntent,
   matchPlanItemByPhrase,
+  isGenericDoneReference,
 } from "../domain/natural-plan-actions.js";
 import {
   createDeviceCommand,
@@ -1099,7 +1100,16 @@ async function maybeMarkNaturalDone({ store, telegram, chatId, telegramUserId, t
     if (!plan || !plan.items?.length) {
       return { handled: false };
     }
-    const match = matchPlanItemByPhrase(plan, intent.reference);
+    let match = matchPlanItemByPhrase(plan, intent.reference);
+    if (!match) {
+      // Generic confirmation ("готово", "задачу закрыл") with exactly one open
+      // item left — complete that one. A phrase that names something specific
+      // is NOT generic, so we never silently complete the wrong item.
+      const open = plan.items.filter((item) => item.status !== "done");
+      if (open.length === 1 && isGenericDoneReference(intent.reference)) {
+        match = { index: plan.items.indexOf(open[0]) + 1, item: open[0], score: 0 };
+      }
+    }
     if (!match) {
       return { handled: false };
     }

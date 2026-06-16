@@ -12,7 +12,11 @@
 const PLAN_HEADER = /(^|\n)\s*(план(\s+(на|дня))?(\s+(сегодня|завтра|день))?|мой\s+план|вот\s+(мой\s+)?план|to\s?do|todo|задачи\s+на\s+(сегодня|день))\s*[:\-—]?\s*/iu;
 const PLAN_QUESTION = /(какой|что|где|покажи|скажи|когда|сколько)\b.*план|план.*\?/iu;
 
-const DONE_VERBS = /(выполн(ил|ила|или|ено|ена|ены)?|сделал(а|и)?|законч(ил|ила|или|ено)?|заверш(ил|ила|или|ено|ена)?|закрыл(а|и)?|провёл|провел|провела|провели|готов(о|а|ы)?|отправил(а|и)?|done|completed|finished)/iu;
+// Completion verbs the bot understands in free text (many morphological forms,
+// RU + EN). Kept broad on purpose: an employee should be able to write "собрание
+// завершено", "отчёт закрыт", "задачу сдал", "созвон провели" and have the bot
+// mark the matching plan item done without a slash command.
+const DONE_VERBS = /(выполн(ил|ила|или|ено|ена|ены)?|сделал(а|и)?|сделан(о|а|ы)?|законч(ил|ила|или|ено|ена)?|заверш(ил|ила|или|ено|ена|ены|ить)?|закрыл(а|и)?|закрыт(а|о|ы)?|сдал(а|и)?|сдан(о|а|ы)?|доделал(а|и)?|доделан(о|а)?|дописал(а|и)?|провёл|провел|провела|провели|готов(о|а|ы)?|отправил(а|и)?|done|completed|complete|finished|finish|closed|ready)/iu;
 const REMAINING_HINT = /(оставш|остальн|все\s+(задачи|пункты|остальн)|всё\s+сделал|все\s+сделал)/iu;
 
 const STOP_WORDS = new Set([
@@ -26,11 +30,16 @@ const STOP_WORDS = new Set([
 function donewords() {
   return [
     "выполнил", "выполнила", "выполнили", "выполнено", "выполнена", "выполнены",
-    "сделал", "сделала", "сделали", "закончил", "закончила", "закончили",
-    "завершил", "завершила", "завершили", "завершено", "закрыл", "закрыла",
-    "закрыли", "провёл", "провел", "провела", "провели", "готово", "готова",
-    "отправил", "отправила", "задачу", "задача", "задание", "пункт", "done",
-    "completed", "finished",
+    "сделал", "сделала", "сделали", "сделано", "сделана", "сделаны",
+    "закончил", "закончила", "закончили", "закончено", "закончена",
+    "завершил", "завершила", "завершили", "завершено", "завершена", "завершены",
+    "завершить", "закрыл", "закрыла", "закрыли", "закрыта", "закрыто", "закрыты",
+    "сдал", "сдала", "сдали", "сдано", "сдана", "сданы",
+    "доделал", "доделала", "доделали", "доделано", "доделана",
+    "дописал", "дописала", "дописали",
+    "провёл", "провел", "провела", "провели", "готово", "готова", "готовы",
+    "отправил", "отправила", "задачу", "задача", "задание", "пункт",
+    "done", "completed", "complete", "finished", "finish", "closed", "ready",
   ];
 }
 
@@ -71,6 +80,17 @@ export function parseNaturalDoneIntent(text) {
   // The phrase to match against plan items = the message minus nothing; the
   // matcher strips verbs/stopwords itself.
   return { kind: "mark_done", reference: raw, text: raw };
+}
+
+/**
+ * Whether a done-phrase carries no concrete subject keywords beyond the
+ * completion verb itself (e.g. "готово", "сделал", "закрыл всё"). For such
+ * generic confirmations the handler may complete the single open plan item.
+ * A phrase that names something ("собрание завершено") returns false, so we
+ * never guess the wrong item.
+ */
+export function isGenericDoneReference(text) {
+  return keywords(text).size === 0;
 }
 
 /**

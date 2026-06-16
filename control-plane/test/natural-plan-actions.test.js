@@ -4,6 +4,7 @@ import {
   parseNaturalPlanIntent,
   parseNaturalDoneIntent,
   matchPlanItemByPhrase,
+  isGenericDoneReference,
 } from "../src/domain/natural-plan-actions.js";
 
 test("parseNaturalPlanIntent reads a numbered plan", () => {
@@ -29,6 +30,29 @@ test("parseNaturalDoneIntent detects completion, not remaining", () => {
   assert.ok(parseNaturalDoneIntent("я выполнил отчёт"));
   assert.equal(parseNaturalDoneIntent("всё сделал"), null); // remaining path
   assert.equal(parseNaturalDoneIntent("какой план"), null);
+});
+
+test("parseNaturalDoneIntent understands more completion words", () => {
+  for (const phrase of [
+    "собрание с командой завершена",
+    "отчёт закрыт",
+    "задачу сдал",
+    "созвон провели",
+    "доделал макет",
+    "meeting done",
+    "task closed",
+  ]) {
+    assert.ok(parseNaturalDoneIntent(phrase), `should detect: ${phrase}`);
+  }
+});
+
+test("isGenericDoneReference: generic confirmations vs named subjects", () => {
+  assert.equal(isGenericDoneReference("готово"), true);
+  assert.equal(isGenericDoneReference("задачу закрыл"), true);
+  assert.equal(isGenericDoneReference("сделал"), true);
+  // names a subject -> not generic, must match a specific item
+  assert.equal(isGenericDoneReference("собрание завершено"), false);
+  assert.equal(isGenericDoneReference("отчёт сдал"), false);
 });
 
 test("matchPlanItemByPhrase matches by keyword and time", () => {
