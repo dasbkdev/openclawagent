@@ -545,7 +545,7 @@ export function normalizePlatrumWeeklyPlan(plan) {
   const days = source.map((day) => ({
     date: stringOrNull(day.date),
     mode: stringOrNull(day.mode),
-    isOff: Boolean(day.is_off) || stringOrNull(day.mode) === "off",
+    isOff: Boolean(day.is_off) || ["off", "day_off", "dayoff", "weekend"].includes(stringOrNull(day.mode) || ""),
     startTime: normalizeClockTime(day.start_time ?? day.start),
     endTime: normalizeClockTime(day.end_time ?? day.end),
     lunchStart: normalizeClockTime(day.lunch_start),
