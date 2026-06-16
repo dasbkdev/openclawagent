@@ -18,6 +18,7 @@ export const READ_ONLY_PLATRUM_ENDPOINTS = Object.freeze([
   /^GET \/api\/v1\/metrics\/team\/?$/u,
   /^GET \/api\/v1\/work-schedules\/my\/?$/u,
   /^GET \/api\/v1\/work-schedules\/admin\/weekly-plans\/?$/u,
+  /^GET \/api\/v1\/work-schedules\/admin\/templates\/?$/u,
 ]);
 
 const AUTH_PLATRUM_ENDPOINTS = Object.freeze([
@@ -126,6 +127,15 @@ export class MockPlatrumClient {
       source: this.source,
       configured: this.configured,
       plans: [],
+      note: "Platrum is not configured",
+    };
+  }
+
+  async getScheduleTemplates() {
+    return {
+      source: this.source,
+      configured: this.configured,
+      templates: [],
       note: "Platrum is not configured",
     };
   }
@@ -311,6 +321,23 @@ export class HttpPlatrumClient {
       configured: this.configured,
       weekStart,
       plans: plans.map(normalizePlatrumWeeklyPlan),
+    };
+  }
+
+  /**
+   * Recurring weekly schedule templates ("шаблон графика на неделю"). Each
+   * template lists a plan per day-of-week and how many users it is assigned to.
+   * Used to answer "what is X's work schedule" when no explicit weekly plan was
+   * submitted for the asked week.
+   */
+  async getScheduleTemplates() {
+    const templates = asArray(
+      await this.requestJson("/api/v1/work-schedules/admin/templates/"),
+    );
+    return {
+      source: this.source,
+      configured: this.configured,
+      templates: templates.map(normalizePlatrumScheduleTemplate),
     };
   }
 
@@ -512,13 +539,18 @@ export function normalizePlatrumDailyReport(report) {
 }
 
 export function normalizePlatrumWeeklyPlan(plan) {
-  const days = asArray(plan?.days_plan?.length ? plan.days_plan : plan?.days).map((day) => ({
+  // The actual planned week lives in `days` (dated entries); `days_plan` is the
+  // template-derived fallback used before a plan is submitted.
+  const source = asArray(plan?.days?.length ? plan.days : plan?.days_plan);
+  const days = source.map((day) => ({
     date: stringOrNull(day.date),
-    startTime: normalizeClockTime(day.start_time),
-    endTime: normalizeClockTime(day.end_time),
     mode: stringOrNull(day.mode),
+    isOff: Boolean(day.is_off) || stringOrNull(day.mode) === "off",
+    startTime: normalizeClockTime(day.start_time ?? day.start),
+    endTime: normalizeClockTime(day.end_time ?? day.end),
     lunchStart: normalizeClockTime(day.lunch_start),
     lunchEnd: normalizeClockTime(day.lunch_end),
+    comment: stringOrNull(day.comment),
     segments: asArray(day.segments).map((segment) => ({
       mode: stringOrNull(segment.mode),
       startTime: normalizeClockTime(segment.start),
@@ -533,9 +565,49 @@ export function normalizePlatrumWeeklyPlan(plan) {
     userName: stringOrNull(plan?.user_name),
     weekStart: stringOrNull(plan?.week_start),
     status: stringOrNull(plan?.status),
+    statusLabel: stringOrNull(plan?.status_label),
+    officeHours: Number.isFinite(Number(plan?.office_hours)) ? Number(plan.office_hours) : null,
+    onlineHours: Number.isFinite(Number(plan?.online_hours)) ? Number(plan.online_hours) : null,
+    onlineReason: stringOrNull(plan?.online_reason),
+    employeeComment: stringOrNull(plan?.employee_comment),
+    adminComment: stringOrNull(plan?.admin_comment),
+    submittedAt: stringOrNull(plan?.submitted_at),
     updatedAt: stringOrNull(plan?.updated_at),
     days,
     raw: plan,
+  };
+}
+
+const WEEKDAY_NAMES = ["", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+
+export function normalizePlatrumScheduleTemplate(template) {
+  const days = asArray(template?.days_plan).map((day) => {
+    const dow = Number(day.day_of_week);
+    return {
+      dayOfWeek: Number.isInteger(dow) ? dow : null,
+      dayName: Number.isInteger(dow) && WEEKDAY_NAMES[dow] ? WEEKDAY_NAMES[dow] : null,
+      mode: stringOrNull(day.mode),
+      isOff: Boolean(day.is_off),
+      startTime: normalizeClockTime(day.start ?? day.start_time),
+      endTime: normalizeClockTime(day.end ?? day.end_time),
+      lunchStart: normalizeClockTime(day.lunch_start),
+      lunchEnd: normalizeClockTime(day.lunch_end),
+      segments: asArray(day.segments).map((segment) => ({
+        mode: stringOrNull(segment.mode),
+        startTime: normalizeClockTime(segment.start),
+        endTime: normalizeClockTime(segment.end),
+      })),
+    };
+  });
+
+  return {
+    id: normalizeId(template?.id),
+    name: stringOrNull(template?.name),
+    isDefault: Boolean(template?.is_default),
+    isActive: Boolean(template?.is_active),
+    usersCount: Number.isFinite(Number(template?.users_count)) ? Number(template.users_count) : null,
+    days,
+    raw: template,
   };
 }
 

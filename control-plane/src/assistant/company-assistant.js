@@ -858,6 +858,41 @@ async function readPlatrumContext({ projects, targetUsers, period, platrumClient
     };
   }
 
+  // Work schedule from Platrum: the per-employee weekly plan (actual planned
+  // week: office/online/hybrid/off + hours) and the recurring named templates
+  // ("шаблон графика на неделю"). This complements Google calendar as a schedule
+  // source so the assistant can answer "график работы сотрудника" from Platrum.
+  let schedule = null;
+  if (platrumClient.getAdminWeeklyPlans || platrumClient.getScheduleTemplates) {
+    const weekStart = toWeekStartISO(period?.from ? new Date(period.from) : new Date());
+    try {
+      const [weekly, templates] = await Promise.all([
+        platrumClient.getAdminWeeklyPlans
+          ? platrumClient.getAdminWeeklyPlans({ weekStart })
+          : Promise.resolve({ plans: [] }),
+        platrumClient.getScheduleTemplates
+          ? platrumClient.getScheduleTemplates()
+          : Promise.resolve({ templates: [] }),
+      ]);
+      schedule = {
+        source: "platrum",
+        configured: Boolean(platrumClient.configured),
+        weekStart,
+        weeklyPlans: (weekly.plans || []).slice(0, 40).map(stripRawSchedule),
+        templates: (templates.templates || []).slice(0, 20).map(stripRawSchedule),
+      };
+    } catch (error) {
+      schedule = {
+        source: "platrum",
+        configured: true,
+        weekStart,
+        error: error instanceof Error ? error.message : String(error),
+        weeklyPlans: [],
+        templates: [],
+      };
+    }
+  }
+
   return {
     source: "platrum",
     configured: Boolean(platrumClient.configured),
@@ -868,7 +903,26 @@ async function readPlatrumContext({ projects, targetUsers, period, platrumClient
     boardTasks,
     dailyReports,
     teamMetrics,
+    schedule,
   };
+}
+
+// Drop the raw API payload from a normalized schedule/template object before it
+// enters the prompt context (the raw doubles the size and adds no signal).
+function stripRawSchedule(entry) {
+  if (!entry || typeof entry !== "object") {
+    return entry;
+  }
+  const { raw, ...rest } = entry;
+  return rest;
+}
+
+// Monday (ISO YYYY-MM-DD, UTC) of the week containing `date`.
+function toWeekStartISO(date) {
+  const d = date instanceof Date && Number.isFinite(date.getTime()) ? date : new Date();
+  const offset = (d.getUTCDay() + 6) % 7;
+  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - offset));
+  return monday.toISOString().slice(0, 10);
 }
 
 async function readBitrixContext({ projects, bitrixClient }) {
@@ -1262,6 +1316,7 @@ function buildSystemPrompt() {
     "context.bitrixBoardTasks — это ВСЕ задачи Bitrix со ВСЕХ рабочих групп и канбан-досок (включая личные задачи group 0 = «Личные задачи»), отсортированные по свежести, с именем группы (groupName) и колонкой канбана (stageName). Для вопросов «покажи все задачи по Bitrix», «что в работе», «задачи на канбане», «текущие задачи команды» используй bitrixBoardTasks, а НЕ context.bitrix (там только пара legacy-проектов, отсортированных по старым дедлайнам). bitrix и bitrixUserTasks оставлены как fallback.",
     "For task and project questions, prefer platrum.userTasks and platrum.projectTasks over Bitrix. When the user explicitly asks about Bitrix tasks/kanban, use bitrixBoardTasks for the full current picture.",
     "For employee work schedules and calendar summaries, first check googleWorkspace.users[].sharedCalendars. These are Google 'Other calendars' from connected PM accounts.",
+    "context.platrum.schedule — это график работы из Platrum. platrum.schedule.weeklyPlans — недельный план каждого сотрудника на неделю weekStart: days[] с датой, режимом mode (office=офис, online=удалённо, hybrid=гибрид, off=выходной), временем startTime–endTime, обедом и часами officeHours/onlineHours, status/statusLabel (например утверждён). platrum.schedule.templates — это шаблоны графика («шаблон графика на неделю»): days[] по дням недели (dayName Пн..Вс) с режимом и временем. Для вопросов про график/расписание работы сотрудника (когда работает, во сколько, офис или удалёнка, выходные) используй platrum.schedule.weeklyPlans для конкретной недели, а platrum.schedule.templates — как постоянный график, если недельного плана на эту неделю нет. Используй это ВМЕСТЕ с googleWorkspace.sharedCalendars, а не вместо.",
     "",
     "RESPONSE FORMAT (strict): Reply with ONLY a single JSON object, no markdown, no code fences, no extra prose before or after it.",
     'Shape: {"title": "...", "sections": [{"heading": "...", "lines": ["...", "..."]}], "next_steps": ["..."]}.',
@@ -1289,7 +1344,7 @@ function buildUserPrompt({ question, context }) {
     "Оформи ответ как Telegram-сообщение: заголовок, блок 'Коротко', блок 'Детали', блок 'Следующие шаги' при необходимости.",
     "Не используй таблицы Markdown, не вставляй JSON и не показывай технический context целиком.",
     "For questions about a specific employee, use bitrixUserTasks first and project Bitrix data second.",
-    "For calendar/schedule questions, use sharedCalendars matches before primary calendar events.",
+    "For calendar/schedule questions, combine platrum.schedule (weeklyPlans + templates) with googleWorkspace.sharedCalendars; use sharedCalendars matches before primary calendar events.",
   ].join("\n");
 }
 

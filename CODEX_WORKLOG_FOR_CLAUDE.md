@@ -8949,3 +8949,39 @@ Fix:
 
 Tests: 253 pass (+3 in test/bitrix-board-tasks.test.js). All integrations remain
 read-only.
+
+## 2026-06-16 - Platrum work schedule as a source (not only Google Calendar)
+
+User: work schedule (график) was pulled only from Google Calendar; Platrum also
+holds it — each employee has either a weekly schedule template or a "недельный
+план" (weekly plan) with the actual schedule.
+
+Live read-only probe of platrum.starlabit.com found the real endpoints:
+- GET /api/v1/work-schedules/admin/weekly-plans/?week_start=YYYY-MM-DD -> per
+  employee: days[{date,start_time,end_time,mode office/online/hybrid/off,
+  lunch_start/end,segments}], office_hours, online_hours, status/status_label.
+  (This is the "недельный план".)
+- GET /api/v1/work-schedules/admin/templates/ -> named recurring templates:
+  days_plan[{day_of_week 1-7,mode,is_off,start,end,lunch}], is_default,
+  users_count. (This is the "шаблон графика на неделю".)
+- GET /api/v1/work-schedules/my/ exists but is caller-scoped (the bot account),
+  useless for reporting on others -> not used.
+
+getAdminWeeklyPlans() already existed but was NEVER wired into the assistant
+context, and templates had no method at all — so schedule came only from Google.
+
+Fix:
+- platrum-client.js: added /admin/templates/ to the read-only allowlist; new
+  getScheduleTemplates(); rewrote normalizePlatrumWeeklyPlan to read the dated
+  days[] (was guessing days_plan) incl. mode/hours/status/admin+employee
+  comments; added normalizePlatrumScheduleTemplate (day_of_week -> Пн..Вс).
+  Mock client gained getScheduleTemplates no-op.
+- company-assistant.js readPlatrumContext: builds platrum.schedule =
+  { weekStart, weeklyPlans (current week, all users, raw stripped), templates }.
+  Guidance updated: use platrum.schedule.weeklyPlans for the asked week, fall
+  back to platrum.schedule.templates as the standing schedule, COMBINE with
+  googleWorkspace.sharedCalendars (not instead of).
+- scripts/linux/probe-platrum-schedule.mjs: throwaway read-only diagnostic.
+
+Tests: 258 pass (+5 in test/platrum-schedule.test.js). All Platrum access stays
+GET-only read-only.
