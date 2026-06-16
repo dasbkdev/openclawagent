@@ -20,6 +20,7 @@ const SECRET_NAMES = [
   "elevenLabsApiKey",
   "sttApiKey",
   "yougileApiKey",
+  "voyageApiKey",
 ];
 
 const SETTING_ENV_MAP = {
@@ -53,6 +54,7 @@ const SECRET_ENV_MAP = {
   elevenLabsApiKey: ["ELEVENLABS_API_KEY"],
   sttApiKey: ["STT_API_KEY"],
   yougileApiKey: ["YOUGILE_API_KEY"],
+  voyageApiKey: ["VOYAGE_API_KEY"],
 };
 
 const DEFAULT_TOKEN_REPORT_RECIPIENT_TELEGRAM_ID = "984834133";
