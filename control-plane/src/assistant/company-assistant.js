@@ -508,7 +508,7 @@ export async function buildAssistantContext({
         facts,
         question,
         k: 8,
-        minScore: 0.3,
+        minScore: 0.2,
       });
     } catch {
       semanticMemory = [];
