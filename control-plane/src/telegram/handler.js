@@ -1217,7 +1217,7 @@ async function maybeMarkNaturalDone({ store, telegram, chatId, telegramUserId, t
     return true;
   }
   if (result.prompt === "ambiguous") {
-    const lines = result.openItems.map((titleText, idx) => `${idx + 1}. ${titleText}`);
+    const lines = result.openItems.map((titleText, idx) => `${idx + 1}. ${escapeHtml(titleText)}`);
     await telegram.sendMessage({
       chatId,
       text: [
@@ -1249,13 +1249,13 @@ async function maybeRelayMessage({ store, telegram, directTelegram, chatId, tele
     if (!canBroadcast(actor)) {
       await telegram.sendMessage({
         chatId,
-        text: "Рассылку всем сотрудникам может делать только руководитель (OWNER или SENIOR_PM). Личное сообщение доступно всем: «сообщи <имя> <текст>».",
+        text: "Рассылку всем сотрудникам может делать только руководитель (OWNER или SENIOR_PM). Личное сообщение доступно всем: «сообщи Имя Текст».",
       });
       return true;
     }
     const body = String(intent.body || "").trim();
     if (!body) {
-      await telegram.sendMessage({ chatId, text: "Что отправить всем сотрудникам? Напишите: «отправь всем <текст>»." });
+      await telegram.sendMessage({ chatId, text: "Что отправить всем сотрудникам? Напишите: «отправь всем Текст»." });
       return true;
     }
     const recipients = listBroadcastRecipients(state, telegramUserId);
@@ -1272,7 +1272,7 @@ async function maybeRelayMessage({ store, telegram, directTelegram, chatId, tele
         title("Подтвердите рассылку"),
         `Отправить ВСЕМ сотрудникам (${recipients.length} чел.):`,
         "",
-        body,
+        escapeHtml(body),
         "",
         "Ответьте «да» — отправлю, «нет» — отменю.",
       ].join("\n"),
@@ -1287,26 +1287,26 @@ async function maybeRelayMessage({ store, telegram, directTelegram, chatId, tele
     }
     await telegram.sendMessage({
       chatId,
-      text: "Не нашёл, кому отправить. Укажите имя сотрудника: «сообщи <имя> <текст>». Список — /users.",
+      text: "Не нашёл, кому отправить. Укажите имя сотрудника: «сообщи Имя Текст». Список — /users.",
     });
     return true;
   }
   if (res.status === "ambiguous") {
-    const names = res.users.map((u) => u.displayName || u.id).join(", ");
+    const names = res.users.map((u) => escapeHtml(u.displayName || u.id)).join(", ");
     await telegram.sendMessage({ chatId, text: `Несколько сотрудников подходят: ${names}. Уточните имя.` });
     return true;
   }
   if (res.status === "not_linked") {
     await telegram.sendMessage({
       chatId,
-      text: `${res.user.displayName || "Этот сотрудник"} ещё не привязал(а) Telegram-бота, поэтому отправить нельзя.`,
+      text: `${escapeHtml(res.user.displayName || "Этот сотрудник")} ещё не привязал(а) Telegram-бота, поэтому отправить нельзя.`,
     });
     return true;
   }
   if (!body) {
     await telegram.sendMessage({
       chatId,
-      text: `Что передать ${res.user.displayName || "сотруднику"}? Напишите: «сообщи ${res.user.displayName || "имя"} <текст>».`,
+      text: `Что передать ${escapeHtml(res.user.displayName || "сотруднику")}? Напишите: «сообщи ${escapeHtml(res.user.displayName || "Имя")} Текст».`,
     });
     return true;
   }
@@ -1315,12 +1315,12 @@ async function maybeRelayMessage({ store, telegram, directTelegram, chatId, tele
   try {
     await directTelegram.sendMessage({
       chatId: recipient.telegram.telegramUserId,
-      text: [`📨 Сообщение от ${senderName}:`, "", body].join("\n"),
+      text: [`📨 Сообщение от ${escapeHtml(senderName)}:`, "", escapeHtml(body)].join("\n"),
     });
   } catch {
     await telegram.sendMessage({
       chatId,
-      text: `Не удалось доставить сообщение ${recipient.displayName || "сотруднику"} — возможно, бот остановлен у получателя.`,
+      text: `Не удалось доставить сообщение ${escapeHtml(recipient.displayName || "сотруднику")} — возможно, бот остановлен у получателя.`,
     });
     return true;
   }
@@ -1339,7 +1339,7 @@ async function maybeRelayMessage({ store, telegram, directTelegram, chatId, tele
     });
   });
 
-  await telegram.sendMessage({ chatId, text: `Отправил ${recipient.displayName || "сотруднику"}: «${body}»` });
+  await telegram.sendMessage({ chatId, text: `Отправил ${escapeHtml(recipient.displayName || "сотруднику")}: «${escapeHtml(body)}»` });
   return true;
 }
 
@@ -1379,12 +1379,12 @@ async function maybePendingBroadcastConfirm({ store, telegram, directTelegram, c
           telegram: directTelegram,
           chatId: recipient.telegram.telegramUserId,
           media: pending.media,
-          caption: [`📢 Всем сотрудникам от ${senderName}`, pending.body].filter(Boolean).join("\n"),
+          caption: [`📢 Всем сотрудникам от ${escapeHtml(senderName)}`, escapeHtml(pending.body)].filter(Boolean).join("\n"),
         });
       } else {
         await directTelegram.sendMessage({
           chatId: recipient.telegram.telegramUserId,
-          text: [`📢 Сообщение всем сотрудникам от ${senderName}:`, "", pending.body].join("\n"),
+          text: [`📢 Сообщение всем сотрудникам от ${escapeHtml(senderName)}:`, "", escapeHtml(pending.body)].join("\n"),
         });
       }
       delivered += 1;
@@ -1458,7 +1458,7 @@ async function handleIncomingMedia({ store, telegram, directTelegram, claudeClie
       text: [
         title("Подтвердите рассылку файла"),
         `Отправить этот ${mediaLabel(media)} ВСЕМ сотрудникам (${recipients.length} чел.)?`,
-        intent.body ? `Подпись: ${intent.body}` : "",
+        intent.body ? `Подпись: ${escapeHtml(intent.body)}` : "",
         "",
         "Ответьте «да» — отправлю, «нет» — отменю.",
       ].filter(Boolean).join("\n"),
@@ -1474,21 +1474,21 @@ async function handleIncomingMedia({ store, telegram, directTelegram, claudeClie
           telegram: directTelegram,
           chatId: res.user.telegram.telegramUserId,
           media,
-          caption: body ? `${body}\n\n— от ${senderName}` : `📎 Файл от ${senderName}`,
+          caption: body ? `${escapeHtml(body)}\n\n— от ${escapeHtml(senderName)}` : `📎 Файл от ${escapeHtml(senderName)}`,
         });
       } catch {
-        await telegram.sendMessage({ chatId, text: `Не удалось отправить файл ${res.user.displayName || "сотруднику"}.` });
+        await telegram.sendMessage({ chatId, text: `Не удалось отправить файл ${escapeHtml(res.user.displayName || "сотруднику")}.` });
         return;
       }
-      await telegram.sendMessage({ chatId, text: `Отправил ${res.user.displayName || "сотруднику"} ${mediaLabel(media)}.` });
+      await telegram.sendMessage({ chatId, text: `Отправил ${escapeHtml(res.user.displayName || "сотруднику")} ${mediaLabel(media)}.` });
       return;
     }
     if (res.status === "not_linked") {
-      await telegram.sendMessage({ chatId, text: `${res.user.displayName || "Сотрудник"} ещё не привязал(а) Telegram-бота.` });
+      await telegram.sendMessage({ chatId, text: `${escapeHtml(res.user.displayName || "Сотрудник")} ещё не привязал(а) Telegram-бота.` });
       return;
     }
     if (res.status === "ambiguous") {
-      await telegram.sendMessage({ chatId, text: `Несколько сотрудников подходят: ${res.users.map((u) => u.displayName || u.id).join(", ")}. Уточните имя.` });
+      await telegram.sendMessage({ chatId, text: `Несколько сотрудников подходят: ${res.users.map((u) => escapeHtml(u.displayName || u.id)).join(", ")}. Уточните имя.` });
       return;
     }
     // not_found — fall through to analysis below.
@@ -1502,7 +1502,7 @@ async function analyzeIncomingMedia({ telegram, directTelegram, claudeClient, vo
   if (media.fileSize && media.fileSize > TELEGRAM_DOWNLOAD_LIMIT_BYTES) {
     await telegram.sendMessage({
       chatId,
-      text: `Файл слишком большой для обработки (> 20 МБ). Могу только переслать: «отправь это <имя>» или «отправь всем».`,
+      text: `Файл слишком большой для обработки (> 20 МБ). Могу только переслать: «отправь это Имя» или «отправь всем».`,
     });
     return;
   }
@@ -1527,16 +1527,16 @@ async function analyzeIncomingMedia({ telegram, directTelegram, claudeClient, vo
         media: [{ kind: isDoc ? "document" : "image", mimeType: media.mimeType, base64 }],
         maxTokens: 1200,
       });
-      await telegram.sendMessage({ chatId, text: [title(isDoc ? "Документ" : "Изображение"), result.text].join("\n") });
+      await telegram.sendMessage({ chatId, text: [title(isDoc ? "Документ" : "Изображение"), escapeHtml(result.text)].join("\n") });
     } catch (error) {
-      await telegram.sendMessage({ chatId, text: `Не удалось обработать ${mediaLabel(media)}: ${error instanceof Error ? error.message : String(error)}` });
+      await telegram.sendMessage({ chatId, text: escapeHtml(`Не удалось обработать ${mediaLabel(media)}: ${error instanceof Error ? error.message : String(error)}`) });
     }
     return;
   }
 
   if (isTranscribable(media)) {
     if (!voiceService?.canTranscribe) {
-      await telegram.sendMessage({ chatId, text: "Распознавание аудио/видео не настроено (STT в /setup). Могу переслать файл: «отправь это <имя>»." });
+      await telegram.sendMessage({ chatId, text: "Распознавание аудио/видео не настроено (STT в /setup). Могу переслать файл: «отправь это Имя»." });
       return;
     }
     await telegram.sendMessage({ chatId, text: `🎬 Распознаю речь из ${mediaLabel(media)}…` }).catch(() => {});
@@ -1562,13 +1562,13 @@ async function analyzeIncomingMedia({ telegram, directTelegram, claudeClient, vo
           // summary is optional
         }
       }
-      const out = [title("Расшифровка"), text.slice(0, 3000)];
+      const out = [title("Расшифровка"), escapeHtml(text.slice(0, 3000))];
       if (summary) {
-        out.push("", "Коротко:", summary);
+        out.push("", "Коротко:", escapeHtml(summary));
       }
       await telegram.sendMessage({ chatId, text: out.join("\n") });
     } catch (error) {
-      await telegram.sendMessage({ chatId, text: `Не удалось распознать ${mediaLabel(media)}: ${error instanceof Error ? error.message : String(error)}` });
+      await telegram.sendMessage({ chatId, text: escapeHtml(`Не удалось распознать ${mediaLabel(media)}: ${error instanceof Error ? error.message : String(error)}`) });
     }
     return;
   }
@@ -1576,8 +1576,8 @@ async function analyzeIncomingMedia({ telegram, directTelegram, claudeClient, vo
   await telegram.sendMessage({
     chatId,
     text: [
-      `Получил ${mediaLabel(media)}${media.fileName ? ` (${media.fileName})` : ""}.`,
-      "Я анализирую изображения, PDF, видео и аудио. Файл такого типа могу переслать сотрудникам: «отправь это <имя>» или «отправь всем».",
+      `Получил ${mediaLabel(media)}${media.fileName ? ` (${escapeHtml(media.fileName)})` : ""}.`,
+      "Я анализирую изображения, PDF, видео и аудио. Файл такого типа могу переслать сотрудникам: «отправь это Имя» или «отправь всем».",
     ].join("\n"),
   });
 }

@@ -9085,3 +9085,24 @@ Incoming Telegram media (photo/document/video/audio) is now handled:
 
 Note: video "analysis" = transcript of its audio track (Claude can't watch
 video). Delivery/recognition only for users who linked Telegram.
+
+## 2026-06-16 - Regression fixes phase 0+1 (HTML crash, model→Opus)
+
+User report: relay to Бегайым didn't arrive; document send crashed with
+"can't parse entities: Unsupported start tag имя"; plans show then disappear;
+memory bad. Diagnosis (live Postgres): only 5 users registered, real employees
+(Бегайым etc.) NOT in directory and mostly no Telegram link → messages can't be
+delivered; registered PMs have generic displayNames not matching Platrum names.
+
+Phase 0a — HTML crash fixed: all my new messages (relay/broadcast/media/done
+prompts + cross-user delivery + media captions) now escapeHtml dynamic/user text
+and dropped literal <имя>/<текст> placeholders (Telegram parsed <имя> as a tag).
+Phase 1 — model: claude-model-policy now puts the assistant on claude-opus-4-8
+and the memory distiller on claude-sonnet-4-6 (was Haiku); OpenClaw desktop
+agents stay on Sonnet. Tests updated. 275 pass.
+
+Still pending: 0b plan-parser robustness (a plan got overwritten by garbage item
+"дня"); name resolution to real Platrum names; memory overhaul (Voyage embeddings
++ pgvector + profile + summaries). Name-mapping note from user: PM1=Бегайым,
+PM2=Перизат, PM3=Айзирек — but state has u-pm-2=Айзирек/u-pm-3=Перизат (swapped);
+do NOT blindly rewrite identities — confirm before remapping.

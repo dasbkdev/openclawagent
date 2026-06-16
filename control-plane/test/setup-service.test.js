@@ -117,7 +117,8 @@ test("SetupService saves service config with encrypted secrets and masked status
     assert.equal(env.YOUGILE_API_KEY, "yougile-secret");
     assert.equal(env.ANTHROPIC_MODEL, "claude-sonnet-4-6");
     assert.equal(env.ANTHROPIC_DEFAULT_SONNET_MODEL, "claude-sonnet-4-6");
-    assert.equal(env.CLAUDE_MODEL, "claude-sonnet-4-6");
+    assert.equal(env.CLAUDE_MODEL, "claude-opus-4-8");
+    assert.equal(env.CLAUDE_MEMORY_MODEL, "claude-sonnet-4-6");
     assert.equal(env.OPENCLAW_DEFAULT_MODEL, "anthropic/claude-sonnet-4-6");
     assert.equal(status.modelPolicy.enforced, true);
     assert.equal(status.modelPolicy.openClawModel, "anthropic/claude-sonnet-4-6");
