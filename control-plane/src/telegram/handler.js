@@ -36,6 +36,13 @@ import {
   isNegative,
 } from "../domain/user-messaging.js";
 import {
+  extractIncomingMedia,
+  forwardMethodFor,
+  isAnalyzableByVision,
+  isTranscribable,
+  TELEGRAM_DOWNLOAD_LIMIT_BYTES,
+} from "../domain/media-actions.js";
+import {
   createDeviceCommand,
   listVisibleDeviceAgents,
   listVisibleDeviceCommands,
@@ -156,6 +163,25 @@ export async function handleTelegramMessage({
       voiceService,
       voiceReplyRequested,
     });
+
+    // Photo / document / video: forward to colleagues ("отправь это Бегайым" /
+    // "отправь всем") or analyze (image+PDF via vision, video/audio via STT).
+    const incomingMedia = extractIncomingMedia(message);
+    if (incomingMedia) {
+      await handleIncomingMedia({
+        store,
+        telegram,
+        directTelegram,
+        claudeClient,
+        voiceService,
+        chatId,
+        telegramUserId,
+        media: incomingMedia,
+        caption: message?.caption ? String(message.caption) : "",
+        now,
+      });
+      return;
+    }
 
     switch (command.name) {
       case "start":
@@ -1348,10 +1374,19 @@ async function maybePendingBroadcastConfirm({ store, telegram, directTelegram, c
   let failed = 0;
   for (const recipient of recipients) {
     try {
-      await directTelegram.sendMessage({
-        chatId: recipient.telegram.telegramUserId,
-        text: [`📢 Сообщение всем сотрудникам от ${senderName}:`, "", pending.body].join("\n"),
-      });
+      if (pending.media) {
+        await sendMediaByKind({
+          telegram: directTelegram,
+          chatId: recipient.telegram.telegramUserId,
+          media: pending.media,
+          caption: [`📢 Всем сотрудникам от ${senderName}`, pending.body].filter(Boolean).join("\n"),
+        });
+      } else {
+        await directTelegram.sendMessage({
+          chatId: recipient.telegram.telegramUserId,
+          text: [`📢 Сообщение всем сотрудникам от ${senderName}:`, "", pending.body].join("\n"),
+        });
+      }
       delivered += 1;
     } catch {
       failed += 1;
@@ -1374,6 +1409,177 @@ async function maybePendingBroadcastConfirm({ store, telegram, directTelegram, c
     text: `Разослал ${delivered} сотрудникам${failed ? `, не доставлено ${failed}` : ""}.`,
   });
   return true;
+}
+
+function mediaLabel(media) {
+  switch (media?.kind) {
+    case "image": return "изображение";
+    case "pdf": return "PDF";
+    case "video": return "видео";
+    case "audio": return "аудио";
+    default: return "файл";
+  }
+}
+
+async function sendMediaByKind({ telegram, chatId, media, caption }) {
+  const method = forwardMethodFor(media); // sendPhoto | sendVideo | sendDocument
+  const key = method === "sendPhoto" ? "photo" : method === "sendVideo" ? "video" : "document";
+  return telegram[method]({ chatId, [key]: media.fileId, caption });
+}
+
+async function handleIncomingMedia({ store, telegram, directTelegram, claudeClient, voiceService, chatId, telegramUserId, media, caption, now }) {
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  if (!actor) {
+    await telegram.sendMessage({ chatId, text: "Сначала зарегистрируйтесь: /register КОД." });
+    return;
+  }
+  const senderName = actor.displayName || actor.telegram?.firstName || "Коллега";
+  const intent = caption ? parseRelayIntent(caption) : null;
+
+  // 1) Forward the file to a colleague or everyone.
+  if (intent && intent.kind === "broadcast") {
+    if (!canBroadcast(actor)) {
+      await telegram.sendMessage({ chatId, text: "Рассылку всем может делать только руководитель (OWNER/SENIOR_PM)." });
+      return;
+    }
+    const recipients = listBroadcastRecipients(state, telegramUserId);
+    if (recipients.length === 0) {
+      await telegram.sendMessage({ chatId, text: "Некому отправлять: ни у кого не привязан Telegram-бот." });
+      return;
+    }
+    await store.update((s) => {
+      setPendingBroadcast(s, telegramUserId, String(intent.body || ""), now, {
+        fileId: media.fileId, kind: media.kind, telegramType: media.telegramType,
+      });
+    });
+    await telegram.sendMessage({
+      chatId,
+      text: [
+        title("Подтвердите рассылку файла"),
+        `Отправить этот ${mediaLabel(media)} ВСЕМ сотрудникам (${recipients.length} чел.)?`,
+        intent.body ? `Подпись: ${intent.body}` : "",
+        "",
+        "Ответьте «да» — отправлю, «нет» — отменю.",
+      ].filter(Boolean).join("\n"),
+    });
+    return;
+  }
+
+  if (intent && intent.kind === "relay") {
+    const { res, body } = splitRecipientAndBody(state, intent.remainder);
+    if (res.status === "ok") {
+      try {
+        await sendMediaByKind({
+          telegram: directTelegram,
+          chatId: res.user.telegram.telegramUserId,
+          media,
+          caption: body ? `${body}\n\n— от ${senderName}` : `📎 Файл от ${senderName}`,
+        });
+      } catch {
+        await telegram.sendMessage({ chatId, text: `Не удалось отправить файл ${res.user.displayName || "сотруднику"}.` });
+        return;
+      }
+      await telegram.sendMessage({ chatId, text: `Отправил ${res.user.displayName || "сотруднику"} ${mediaLabel(media)}.` });
+      return;
+    }
+    if (res.status === "not_linked") {
+      await telegram.sendMessage({ chatId, text: `${res.user.displayName || "Сотрудник"} ещё не привязал(а) Telegram-бота.` });
+      return;
+    }
+    if (res.status === "ambiguous") {
+      await telegram.sendMessage({ chatId, text: `Несколько сотрудников подходят: ${res.users.map((u) => u.displayName || u.id).join(", ")}. Уточните имя.` });
+      return;
+    }
+    // not_found — fall through to analysis below.
+  }
+
+  // 2) No forward target → analyze the media.
+  await analyzeIncomingMedia({ telegram, directTelegram, claudeClient, voiceService, chatId, media, caption });
+}
+
+async function analyzeIncomingMedia({ telegram, directTelegram, claudeClient, voiceService, chatId, media, caption }) {
+  if (media.fileSize && media.fileSize > TELEGRAM_DOWNLOAD_LIMIT_BYTES) {
+    await telegram.sendMessage({
+      chatId,
+      text: `Файл слишком большой для обработки (> 20 МБ). Могу только переслать: «отправь это <имя>» или «отправь всем».`,
+    });
+    return;
+  }
+
+  if (isAnalyzableByVision(media)) {
+    if (!claudeClient?.analyzeMedia) {
+      await telegram.sendMessage({ chatId, text: "Анализ изображений/документов пока недоступен." });
+      return;
+    }
+    await telegram.sendMessage({ chatId, text: `🔍 Смотрю ${mediaLabel(media)}…` }).catch(() => {});
+    try {
+      const file = await directTelegram.getFile({ fileId: media.fileId });
+      const bytes = await directTelegram.downloadFile({ filePath: file.file_path });
+      const base64 = Buffer.from(bytes).toString("base64");
+      const isDoc = media.kind === "pdf";
+      const prompt = caption?.trim() || (isDoc
+        ? "Кратко изложи содержание документа: о чём он, ключевые пункты, числа, выводы. По-русски."
+        : "Опиши, что на изображении, и извлеки важную информацию (текст, числа, суть). По-русски.");
+      const result = await claudeClient.analyzeMedia({
+        system: "Ты ассистент Starlab. Отвечай кратко и по делу, на русском, без Markdown-разметки.",
+        prompt,
+        media: [{ kind: isDoc ? "document" : "image", mimeType: media.mimeType, base64 }],
+        maxTokens: 1200,
+      });
+      await telegram.sendMessage({ chatId, text: [title(isDoc ? "Документ" : "Изображение"), result.text].join("\n") });
+    } catch (error) {
+      await telegram.sendMessage({ chatId, text: `Не удалось обработать ${mediaLabel(media)}: ${error instanceof Error ? error.message : String(error)}` });
+    }
+    return;
+  }
+
+  if (isTranscribable(media)) {
+    if (!voiceService?.canTranscribe) {
+      await telegram.sendMessage({ chatId, text: "Распознавание аудио/видео не настроено (STT в /setup). Могу переслать файл: «отправь это <имя>»." });
+      return;
+    }
+    await telegram.sendMessage({ chatId, text: `🎬 Распознаю речь из ${mediaLabel(media)}…` }).catch(() => {});
+    try {
+      const file = await directTelegram.getFile({ fileId: media.fileId });
+      const bytes = await directTelegram.downloadFile({ filePath: file.file_path });
+      const transcript = await voiceService.transcribeMedia({ bytes, filename: media.fileName, mimeType: media.mimeType });
+      const text = String(transcript?.text || "").trim();
+      if (!text) {
+        await telegram.sendMessage({ chatId, text: "В этом файле не нашлось распознаваемой речи." });
+        return;
+      }
+      let summary = "";
+      if (claudeClient?.complete && text.length > 400) {
+        try {
+          const r = await claudeClient.complete({
+            system: "Кратко суммируй на русском, без разметки.",
+            user: `Сделай краткое содержание расшифровки:\n\n${text.slice(0, 6000)}`,
+            maxTokens: 500,
+          });
+          summary = r.text;
+        } catch {
+          // summary is optional
+        }
+      }
+      const out = [title("Расшифровка"), text.slice(0, 3000)];
+      if (summary) {
+        out.push("", "Коротко:", summary);
+      }
+      await telegram.sendMessage({ chatId, text: out.join("\n") });
+    } catch (error) {
+      await telegram.sendMessage({ chatId, text: `Не удалось распознать ${mediaLabel(media)}: ${error instanceof Error ? error.message : String(error)}` });
+    }
+    return;
+  }
+
+  await telegram.sendMessage({
+    chatId,
+    text: [
+      `Получил ${mediaLabel(media)}${media.fileName ? ` (${media.fileName})` : ""}.`,
+      "Я анализирую изображения, PDF, видео и аудио. Файл такого типа могу переслать сотрудникам: «отправь это <имя>» или «отправь всем».",
+    ].join("\n"),
+  });
 }
 
 async function sendDailyProgress({ store, telegram, chatId, telegramUserId, kickidlerClient, bitrixClient, platrumClient, target, now }) {

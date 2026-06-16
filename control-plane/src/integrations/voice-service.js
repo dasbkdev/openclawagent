@@ -80,6 +80,21 @@ export class VoiceService {
     });
   }
 
+  /**
+   * Transcribe arbitrary audio/video bytes (e.g. a Telegram video). STT
+   * providers (ElevenLabs Scribe, OpenAI transcribe) accept a video file and
+   * use its audio track, so no local ffmpeg is needed.
+   */
+  async transcribeMedia({ bytes, filename = "media.mp4", mimeType = "video/mp4" }) {
+    if (!this.enabled) {
+      throw new VoiceServiceError("Голосовой режим отключен в /setup.");
+    }
+    if (!this.sttClient?.configured) {
+      throw new VoiceServiceError("STT не настроен. Укажи STT API Key или ElevenLabs API Key в /setup.");
+    }
+    return await this.sttClient.transcribe({ bytes, filename, mimeType });
+  }
+
   async synthesize(text) {
     if (!this.enabled) {
       throw new VoiceServiceError("Голосовой режим отключен в /setup.");

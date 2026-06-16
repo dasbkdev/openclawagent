@@ -39,6 +39,15 @@ export class MissingClaudeClient {
     };
   }
 
+  async analyzeMedia() {
+    return {
+      text: "Claude API key еще не настроен — анализ изображений и документов недоступен. Сохрани ключ в /setup.",
+      model: this.model,
+      usage: null,
+      configured: false,
+    };
+  }
+
   async researchWeb() {
     return { text: "", sources: [], model: this.model, usage: null, configured: false };
   }
@@ -73,6 +82,42 @@ export class HttpClaudeClient {
     const payload = await this.sendMessages({
       system,
       messages: [{ role: "user", content: user }],
+      maxTokens,
+      model: requestModel,
+    });
+    return {
+      text: readTextContent(payload),
+      model: payload.model || requestModel,
+      usage: normalizeUsage(payload.usage),
+      stopReason: payload.stop_reason || null,
+      configured: true,
+    };
+  }
+
+  /**
+   * Vision: analyze images and PDF documents. `media` is a list of
+   * { kind: "image"|"document", mimeType, base64 }. Returns the model's text.
+   */
+  async analyzeMedia({ system, prompt, media = [], maxTokens = 1500, model }) {
+    const content = [];
+    for (const item of media) {
+      if (item.kind === "image") {
+        content.push({
+          type: "image",
+          source: { type: "base64", media_type: item.mimeType || "image/jpeg", data: item.base64 },
+        });
+      } else if (item.kind === "document") {
+        content.push({
+          type: "document",
+          source: { type: "base64", media_type: item.mimeType || "application/pdf", data: item.base64 },
+        });
+      }
+    }
+    content.push({ type: "text", text: prompt });
+    const requestModel = model || this.model;
+    const payload = await this.sendMessages({
+      system,
+      messages: [{ role: "user", content }],
       maxTokens,
       model: requestModel,
     });

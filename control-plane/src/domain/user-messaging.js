@@ -153,9 +153,10 @@ export function ensureMessagingState(state) {
   return state.pendingBroadcasts;
 }
 
-export function setPendingBroadcast(state, telegramUserId, body, now = new Date()) {
+export function setPendingBroadcast(state, telegramUserId, body, now = new Date(), media = null) {
   ensureMessagingState(state)[String(telegramUserId)] = {
     body,
+    media: media || null,
     createdAt: now.toISOString(),
   };
 }

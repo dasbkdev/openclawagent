@@ -1,3 +1,11 @@
+function withCaption(body, caption) {
+  if (caption && String(caption).trim()) {
+    body.caption = String(caption);
+    body.parse_mode = "HTML";
+  }
+  return body;
+}
+
 export class TelegramBotApi {
   constructor({ token, timeoutMs = 30000 }) {
     if (!token) {
@@ -27,6 +35,20 @@ export class TelegramBotApi {
 
   async getMe() {
     return await this.call("getMe", {});
+  }
+
+  // Forwarding by file_id: the same bot can re-send a received file to any chat
+  // without re-uploading. `photo`/`document`/`video` are Telegram file_id strings.
+  async sendPhoto({ chatId, photo, caption }) {
+    return await this.call("sendPhoto", withCaption({ chat_id: chatId, photo }, caption));
+  }
+
+  async sendDocument({ chatId, document, caption }) {
+    return await this.call("sendDocument", withCaption({ chat_id: chatId, document }, caption));
+  }
+
+  async sendVideo({ chatId, video, caption }) {
+    return await this.call("sendVideo", withCaption({ chat_id: chatId, video }, caption));
   }
 
   async getFile({ fileId }) {

@@ -9061,3 +9061,27 @@ Stage 1 (text) implemented:
 
 Stage 2 (incoming media: forward + Claude vision for images/PDF + video->audio->
 STT) still to do.
+
+## 2026-06-16 - Media handling (stage 2): forward + analyze images/PDF/video
+
+Incoming Telegram media (photo/document/video/audio) is now handled:
+- domain/media-actions.js (pure): extractIncomingMedia classifies photo->image,
+  document by mime (image/pdf/other), video/video_note/animation->video,
+  audio->audio; forwardMethodFor / isAnalyzableByVision / isTranscribable.
+- telegram-api.js: sendPhoto/sendDocument/sendVideo (forward by file_id, no
+  re-upload).
+- claude-client.js: analyzeMedia() — vision for images + PDF documents (base64
+  blocks). MissingClaudeClient stub included.
+- voice-service.js: transcribeMedia() — feeds video/audio bytes straight to the
+  STT client (ElevenLabs Scribe / OpenAI transcribe accept video; no ffmpeg,
+  which the server lacks).
+- handler.js: media intercepted before the command switch (caption = message.caption).
+  * caption "отправь это <имя>" / "отправь всем" -> FORWARD via file_id (single
+    immediate, broadcast confirmed да/нет, OWNER/SENIOR_PM only; pending now
+    carries the media).
+  * otherwise ANALYZE: image+PDF via Claude vision; video/audio via STT (+ short
+    Claude summary when long); >20 MB or unknown doc types -> offer to forward.
+- Tests: 275 pass (+6 media-actions.test.js).
+
+Note: video "analysis" = transcript of its audio track (Claude can't watch
+video). Delivery/recognition only for users who linked Telegram.
