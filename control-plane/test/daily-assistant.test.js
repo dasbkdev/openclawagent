@@ -5,13 +5,37 @@ import {
   buildDailyManagerReport,
   buildDailyProgress,
   collectDueDailyAssistantPrompts,
+  clearDailyPlan,
   createOrUpdateDailyPlan,
   ensureDailyAssistantState,
   findTodayPlanForUser,
   formatDailyProgress,
   getLocalDateKey,
   markDailyPlanItemDone,
+  removeDailyPlanItem,
 } from "../src/domain/daily-assistant.js";
+
+test("removeDailyPlanItem and clearDailyPlan edit/clear the plan", () => {
+  const now = new Date("2026-06-16T06:00:00.000Z");
+  const state = createInitialState({ BOOTSTRAP_OWNER_TELEGRAM_ID: "999" });
+  const pm = getUserById(state, "u-pm-1");
+  pm.telegram = { telegramUserId: "777", username: "pm1", linkedAt: now.toISOString() };
+
+  createOrUpdateDailyPlan(state, { actor: pm, text: "отчет; канбан; клиент", now });
+  // remove by text
+  const r1 = removeDailyPlanItem(state, { actor: pm, selector: "канбан", now });
+  assert.equal(r1.item.title, "канбан");
+  assert.deepEqual(findTodayPlanForUser(state, pm.id, now).items.map((i) => i.title), ["отчет", "клиент"]);
+  // remove by number
+  removeDailyPlanItem(state, { actor: pm, selector: "1", now });
+  assert.deepEqual(findTodayPlanForUser(state, pm.id, now).items.map((i) => i.title), ["клиент"]);
+  // clear whole plan
+  const cleared = clearDailyPlan(state, { actor: pm, now });
+  assert.equal(cleared.existed, true);
+  assert.equal(findTodayPlanForUser(state, pm.id, now), null);
+  // clearing again is a safe no-op
+  assert.equal(clearDailyPlan(state, { actor: pm, now }).existed, false);
+});
 import { getUserById } from "../src/domain/policy.js";
 import { createInitialState } from "../src/infra/seed.js";
 

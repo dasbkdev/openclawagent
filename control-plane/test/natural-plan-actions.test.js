@@ -6,7 +6,27 @@ import {
   matchPlanItemByPhrase,
   isGenericDoneReference,
   isReplacePlanIntent,
+  parseAddToPlanIntent,
+  parseDeletePlanIntent,
 } from "../src/domain/natural-plan-actions.js";
+
+test("parseAddToPlanIntent extracts items after the plan keyword", () => {
+  assert.deepEqual(parseAddToPlanIntent("добавь в план дня: позвонить клиенту; проверить отчёт").items, ["позвонить клиенту", "проверить отчёт"]);
+  assert.deepEqual(parseAddToPlanIntent("добавь к плану созвон с командой, написать письмо").items, ["созвон с командой", "написать письмо"]);
+  // referenced earlier items, none inline -> empty (handler will ask)
+  assert.deepEqual(parseAddToPlanIntent("добавь эти два пункта к плану дня").items, []);
+  assert.equal(parseAddToPlanIntent("какой план"), null);
+  assert.equal(parseAddToPlanIntent("добавь воды в чайник"), null); // no "план"
+});
+
+test("parseDeletePlanIntent: whole plan vs one item vs ignore", () => {
+  assert.deepEqual(parseDeletePlanIntent("очисти план дня"), { kind: "clear_plan" });
+  assert.deepEqual(parseDeletePlanIntent("удали весь план"), { kind: "clear_plan" });
+  assert.deepEqual(parseDeletePlanIntent("удали план"), { kind: "clear_plan" });
+  assert.equal(parseDeletePlanIntent("удали пункт собрание из плана").kind, "remove_item");
+  assert.equal(parseDeletePlanIntent("убери собрание из плана дня").reference, "собрание");
+  assert.equal(parseDeletePlanIntent("удали файл"), null); // not about the plan
+});
 
 test("isReplacePlanIntent: replace vs merge wording", () => {
   assert.ok(isReplacePlanIntent("новый план на сегодня: A; B"));

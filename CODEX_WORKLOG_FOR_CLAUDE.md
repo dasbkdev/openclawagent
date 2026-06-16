@@ -9138,3 +9138,16 @@ Fix:
 
 Next memory stages (optional): per-user profile section, rolling conversation
 summary, embed facts on write (distiller) instead of lazy-on-read.
+
+## 2026-06-16 - Plan: add-to-plan + delete item/whole plan in natural language
+
+User: "добавь эти два пункта к плану дня" wasn't recognized (fell to AI which
+hallucinated about Platrum); also wanted delete of a plan item / whole plan.
+- natural-plan-actions: parseAddToPlanIntent ("добавь в план дня: A; B" / "добавь
+  A, B к плану"; empty items -> handler asks); parseDeletePlanIntent ("очисти
+  план дня" -> clear; "удали пункт X из плана" -> remove_item; ignores non-plan
+  "удали файл"). Fixed \w (ASCII-only) bug that left a stray "а".
+- daily-assistant: removeDailyPlanItem (by number or text) + clearDailyPlan.
+- handler: maybeAddToPlan + maybeDeletePlan wired before plan-create; merge
+  keeps statuses; replies show the updated plan / ask which item when unclear.
+  All user text escaped. Tests: 288 pass.

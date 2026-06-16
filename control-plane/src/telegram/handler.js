@@ -17,6 +17,8 @@ import {
   findTodayPlanForUser,
   markDailyPlanItemDone,
   markRemainingDailyPlanItemsDone,
+  removeDailyPlanItem,
+  clearDailyPlan,
 } from "../domain/daily-assistant.js";
 import {
   parseNaturalPlanIntent,
@@ -24,6 +26,8 @@ import {
   matchPlanItemByPhrase,
   isGenericDoneReference,
   isReplacePlanIntent,
+  parseAddToPlanIntent,
+  parseDeletePlanIntent,
 } from "../domain/natural-plan-actions.js";
 import {
   parseRelayIntent,
@@ -491,6 +495,22 @@ export async function handleTelegramMessage({
             store, telegram, directTelegram, chatId, telegramUserId, text: command.raw, now,
           });
           if (handledRelay) {
+            return;
+          }
+
+          // "удали пункт … из плана" / "очисти план дня" — remove from the plan.
+          const handledPlanDelete = await maybeDeletePlan({
+            store, telegram, chatId, telegramUserId, text: command.raw, now,
+          });
+          if (handledPlanDelete) {
+            return;
+          }
+
+          // "добавь в план дня: …" — append items to today's plan.
+          const handledPlanAdd = await maybeAddToPlan({
+            store, telegram, chatId, telegramUserId, text: command.raw, now,
+          });
+          if (handledPlanAdd) {
             return;
           }
 
@@ -1127,6 +1147,93 @@ async function saveDailyPlan({ store, telegram, chatId, telegramUserId, text, no
   });
 
   await telegram.sendMessage({ chatId, text: formatDailyPlan(plan) });
+}
+
+async function maybeAddToPlan({ store, telegram, chatId, telegramUserId, text, now }) {
+  const intent = parseAddToPlanIntent(text);
+  if (!intent) {
+    return false;
+  }
+  if (!intent.items.length) {
+    await telegram.sendMessage({
+      chatId,
+      text: "Какие пункты добавить в план? Напишите их списком, например: «добавь в план: позвонить клиенту; проверить отчёт».",
+    });
+    return true;
+  }
+  const plan = await store.update((state) => {
+    const actor = resolveActorByTelegramId(state, telegramUserId);
+    const updated = createOrUpdateDailyPlan(state, { actor, text: intent.items.join("\n"), now });
+    recordAssistantMemoryEvent(state, {
+      userId: actor.id, channel: "telegram", role: "user",
+      kind: "daily_plan_add", text,
+      target: { userId: actor.id, date: updated.date }, now,
+    });
+    return updated;
+  });
+  await telegram.sendMessage({ chatId, text: [title("Добавил в план"), formatDailyPlan(plan)].join("\n") });
+  return true;
+}
+
+async function maybeDeletePlan({ store, telegram, chatId, telegramUserId, text, now }) {
+  const intent = parseDeletePlanIntent(text);
+  if (!intent) {
+    return false;
+  }
+
+  if (intent.kind === "clear_plan") {
+    const result = await store.update((state) => {
+      const actor = resolveActorByTelegramId(state, telegramUserId);
+      return clearDailyPlan(state, { actor, now });
+    });
+    await telegram.sendMessage({
+      chatId,
+      text: result.existed
+        ? `План на сегодня удалён (было пунктов: ${result.removedCount}).`
+        : "Плана на сегодня нет — удалять нечего.",
+    });
+    return true;
+  }
+
+  const outcome = await store.update((state) => {
+    const actor = resolveActorByTelegramId(state, telegramUserId);
+    const plan = findTodayPlanForUser(state, actor.id, now);
+    if (!plan || !plan.items?.length) {
+      return { status: "no_plan" };
+    }
+    let match = matchPlanItemByPhrase(plan, intent.reference);
+    if (!match && /^\d+$/u.test(intent.reference)) {
+      match = { index: Number(intent.reference) };
+    }
+    if (!match) {
+      return { status: "not_found", open: plan.items.map((item) => item.title) };
+    }
+    const removed = removeDailyPlanItem(state, { actor, selector: String(match.index), now });
+    return { status: "ok", item: removed.item, remaining: removed.plan.items.length };
+  });
+
+  if (outcome.status === "no_plan") {
+    await telegram.sendMessage({ chatId, text: "Плана на сегодня нет — удалять нечего." });
+    return true;
+  }
+  if (outcome.status === "not_found") {
+    await telegram.sendMessage({
+      chatId,
+      text: [
+        title("Какой пункт удалить?"),
+        "Не нашёл такой пункт. Сейчас в плане:",
+        ...outcome.open.map((titleText, idx) => `${idx + 1}. ${escapeHtml(titleText)}`),
+        "",
+        "Напишите ключевое слово пункта или его номер.",
+      ].join("\n"),
+    });
+    return true;
+  }
+  await telegram.sendMessage({
+    chatId,
+    text: `Удалил пункт: «${escapeHtml(outcome.item.title)}». Осталось пунктов: ${outcome.remaining}.`,
+  });
+  return true;
 }
 
 async function maybeCreateNaturalPlan({ store, telegram, chatId, telegramUserId, text, now }) {

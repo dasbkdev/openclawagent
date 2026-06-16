@@ -73,6 +73,83 @@ export function isReplacePlanIntent(text) {
   return REPLACE_PLAN.test(String(text || ""));
 }
 
+const ADD_VERB = /(добав(?:ь|ьте|ить)|допиши(?:те)?|дополни(?:те)?|впиши(?:те)?|внеси(?:те)?)/iu;
+const DELETE_VERB = /^\s*(удали(?:ть|те)?|убери(?:те)?|сотри(?:те)?|вычеркни(?:те)?|выкини(?:те)?|очисти(?:ть|те)?|снеси)[\s,:—-]+(.+)$/isu;
+
+function splitPlanItems(text) {
+  return String(text || "")
+    .split(/\r?\n|[;•]|,(?!\d)/u)
+    .map((item) => item.replace(/^\s*[-*\d.)]+\s*/u, "").trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+/**
+ * "добавь к плану дня: A; B" / "добавь A, B в план" — add items to today's plan
+ * (merge). Returns { kind:"add_plan", items } or null. items may be empty when
+ * the user referenced earlier items ("добавь эти два пункта к плану дня").
+ */
+export function parseAddToPlanIntent(text) {
+  const raw = String(text || "").trim();
+  if (!raw || raw.startsWith("/")) {
+    return null;
+  }
+  if (!ADD_VERB.test(raw) || !/план/iu.test(raw)) {
+    return null;
+  }
+  // Items after the "план [дня] :" keyword …
+  let itemsText = "";
+  const after = /план[ауеыо]?(?:\s+(?:дня|на\s+сегодня))?\s*[:\-—]?\s*/iu.exec(raw);
+  if (after) {
+    itemsText = raw.slice(after.index + after[0].length).trim();
+  }
+  // … or between the verb and "к/в план" ("добавь A и B к плану").
+  if (!itemsText) {
+    const between = new RegExp(`${ADD_VERB.source}\\s+(.+?)\\s+(?:к|в)\\s+план`, "isu").exec(raw);
+    if (between) {
+      itemsText = (between[2] || "").trim();
+    }
+  }
+  itemsText = itemsText.replace(/^эти\s+\S+\s+(?:пункт[а-яё]*|задач[а-яё]*|дел[а-яё]*)\s*[:\-—]?\s*/iu, "").trim();
+  return { kind: "add_plan", items: splitPlanItems(itemsText) };
+}
+
+/**
+ * "удали пункт собрание из плана" / "очисти план дня" — remove one item or the
+ * whole plan. Returns { kind:"remove_item", reference } | { kind:"clear_plan" }
+ * | null. Only triggers when the message mentions план/пункт (so "удали файл"
+ * is not hijacked).
+ */
+export function parseDeletePlanIntent(text) {
+  const raw = String(text || "").trim();
+  if (!raw || raw.startsWith("/")) {
+    return null;
+  }
+  const m = DELETE_VERB.exec(raw);
+  if (!m) {
+    return null;
+  }
+  const rest = m[2].trim();
+  if (!/план|пункт/iu.test(rest)) {
+    return null;
+  }
+  if (/^(?:весь\s+|целиком\s+|мой\s+|этот\s+)?план(?:\s+дня|\s+на\s+сегодня)?\s*$/iu.test(rest)) {
+    return { kind: "clear_plan" };
+  }
+  const reference = rest
+    .replace(/из\s+план[ауеыо]?(?:\s+дня|\s+на\s+сегодня)?/iu, " ")
+    .replace(/в\s+план[еу]?(?:\s+дня)?/iu, " ")
+    .replace(/план[ауеыо]?(?:\s+дня|\s+на\s+сегодня)?/iu, " ")
+    .replace(/пункт[ауеыо]?/iu, " ")
+    .replace(/задач[ауеиыу]?/iu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (reference) {
+    return { kind: "remove_item", reference };
+  }
+  return { kind: "clear_plan" };
+}
+
 export function parseNaturalDoneIntent(text) {
   const raw = String(text || "").trim();
   if (!raw || raw.startsWith("/")) {

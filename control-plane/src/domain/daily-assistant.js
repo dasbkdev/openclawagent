@@ -164,6 +164,60 @@ export function markDailyPlanItemDone(state, { actor, userId = actor.id, selecto
   return { plan, item };
 }
 
+export function removeDailyPlanItem(state, { actor, userId = actor.id, selector, now = new Date() }) {
+  ensureDailyAssistantState(state);
+  assertCanAccessUser(state, actor, userId);
+  if (actor.role === Roles.PM && actor.id !== userId) {
+    throw validation("PM can edit only own daily plan");
+  }
+
+  const date = getLocalDateKey(now);
+  const plan = findDailyPlan(state, userId, date);
+  if (!plan || !plan.items?.length) {
+    throw validation("Daily plan is not created yet.");
+  }
+
+  const item = resolvePlanItem(plan, selector);
+  plan.items = plan.items.filter((candidate) => candidate.id !== item.id);
+  plan.plannedTaskTitles = plan.items.map((entry) => entry.title);
+  plan.updatedAt = now.toISOString();
+  plan.updatedByUserId = actor.id;
+
+  appendAuditEvent(state, {
+    actorUserId: actor.id,
+    actorTelegramUserId: actor.telegram?.telegramUserId,
+    action: "daily_assistant.plan_item.remove",
+    target: { userId, date, itemId: item.id },
+  });
+
+  return { plan, item };
+}
+
+export function clearDailyPlan(state, { actor, userId = actor.id, now = new Date() }) {
+  ensureDailyAssistantState(state);
+  assertCanAccessUser(state, actor, userId);
+  if (actor.role === Roles.PM && actor.id !== userId) {
+    throw validation("PM can edit only own daily plan");
+  }
+
+  const date = getLocalDateKey(now);
+  const index = state.dailyWorkPlans.findIndex((plan) => plan.userId === userId && plan.date === date);
+  const removedCount = index >= 0 ? (state.dailyWorkPlans[index].items?.length || 0) : 0;
+  if (index >= 0) {
+    state.dailyWorkPlans.splice(index, 1);
+  }
+
+  appendAuditEvent(state, {
+    actorUserId: actor.id,
+    actorTelegramUserId: actor.telegram?.telegramUserId,
+    action: "daily_assistant.plan.clear",
+    target: { userId, date },
+    metadata: { removedCount },
+  });
+
+  return { date, removedCount, existed: index >= 0 };
+}
+
 export function markRemainingDailyPlanItemsDone(state, { actor, userId = actor.id, now = new Date() }) {
   ensureDailyAssistantState(state);
   assertCanAccessUser(state, actor, userId);
