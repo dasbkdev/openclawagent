@@ -1094,24 +1094,33 @@ async function maybeMarkNaturalDone({ store, telegram, chatId, telegramUserId, t
   if (!intent) {
     return false;
   }
+  // A question that merely contains a done-verb ("ты сделал отчёт?") is not a
+  // self-completion — let the assistant answer it instead of prompting.
+  if (/\?\s*$/u.test(String(text || "").trim())) {
+    return false;
+  }
   const result = await store.update((state) => {
     const actor = resolveActorByTelegramId(state, telegramUserId);
     const plan = findTodayPlanForUser(state, actor.id, now);
     if (!plan || !plan.items?.length) {
-      return { handled: false };
+      return { prompt: "no_plan" };
+    }
+    const open = plan.items.filter((item) => item.status !== "done");
+    if (open.length === 0) {
+      return { prompt: "all_done" };
     }
     let match = matchPlanItemByPhrase(plan, intent.reference);
     if (!match) {
       // Generic confirmation ("готово", "задачу закрыл") with exactly one open
       // item left — complete that one. A phrase that names something specific
       // is NOT generic, so we never silently complete the wrong item.
-      const open = plan.items.filter((item) => item.status !== "done");
       if (open.length === 1 && isGenericDoneReference(intent.reference)) {
         match = { index: plan.items.indexOf(open[0]) + 1, item: open[0], score: 0 };
       }
     }
     if (!match) {
-      return { handled: false };
+      // Could not tell which item — ask, listing the open ones.
+      return { prompt: "ambiguous", openItems: open.map((item) => item.title) };
     }
     const done = markDailyPlanItemDone(state, { actor, selector: String(match.index), now });
     recordAssistantMemoryEvent(state, {
@@ -1121,11 +1130,50 @@ async function maybeMarkNaturalDone({ store, telegram, chatId, telegramUserId, t
     });
     return { handled: true, result: done };
   });
-  if (!result.handled) {
-    return false;
+
+  if (result.handled) {
+    await telegram.sendMessage({ chatId, text: formatDoneResult(result.result) });
+    return true;
   }
-  await telegram.sendMessage({ chatId, text: formatDoneResult(result.result) });
-  return true;
+  if (result.prompt === "no_plan") {
+    await telegram.sendMessage({
+      chatId,
+      text: [
+        title("Плана на сегодня пока нет"),
+        "Я отмечаю выполненными пункты плана дня, но плана ещё нет — поэтому отмечать нечего.",
+        "",
+        "Создайте план одним сообщением, например:",
+        "План на сегодня:",
+        "1. Собрание с командой",
+        "2. Протестировать ИИ-агента",
+        "",
+        "Потом просто напишите, что сделали — «собрание провёл», «готово» — и я отмечу пункт.",
+      ].join("\n"),
+    });
+    return true;
+  }
+  if (result.prompt === "all_done") {
+    await telegram.sendMessage({
+      chatId,
+      text: "Все пункты плана на сегодня уже отмечены выполненными ✅",
+    });
+    return true;
+  }
+  if (result.prompt === "ambiguous") {
+    const lines = result.openItems.map((titleText, idx) => `${idx + 1}. ${titleText}`);
+    await telegram.sendMessage({
+      chatId,
+      text: [
+        title("Какой пункт завершить?"),
+        "Не понял, какой именно пункт отметить. Открытые пункты:",
+        ...lines,
+        "",
+        "Напишите ключевое слово пункта (например «собрание провёл») или /done с номером.",
+      ].join("\n"),
+    });
+    return true;
+  }
+  return false;
 }
 
 async function sendDailyProgress({ store, telegram, chatId, telegramUserId, kickidlerClient, bitrixClient, platrumClient, target, now }) {

@@ -9025,3 +9025,13 @@ Changes (natural-plan-actions.js + handler.js):
 - Tests: 261 pass (+2).
 
 Assistant model: claude-sonnet-4-6 (forced by claude-model-policy applyToEnv).
+
+### Follow-up: prompt when completion can't be applied
+
+maybeMarkNaturalDone now guides the user instead of silently falling through:
+- question ending with "?" -> not treated as self-completion (assistant answers).
+- no plan today -> prompt to create one (with an example), then confirm.
+- all items already done -> say so.
+- plan exists but item unclear -> list the open items and ask which (keyword or
+  /done N).
+Tests still 261 (handler is integration-level; the parse/match units are covered).
