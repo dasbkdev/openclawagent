@@ -64,7 +64,7 @@ export function getCommandRemainder(command) {
   return firstSpace === -1 ? "" : raw.slice(firstSpace + 1).trim();
 }
 
-export function createOrUpdateDailyPlan(state, { actor, userId = actor.id, text, now = new Date() }) {
+export function createOrUpdateDailyPlan(state, { actor, userId = actor.id, text, replace = false, now = new Date() }) {
   ensureDailyAssistantState(state);
   assertCanAccessUser(state, actor, userId);
   if (actor.role === Roles.PM && actor.id !== userId) {
@@ -77,12 +77,25 @@ export function createOrUpdateDailyPlan(state, { actor, userId = actor.id, text,
   }
 
   const date = getLocalDateKey(now);
-  const items = parsePlanItems(planText);
-  if (!items.length) {
+  const parsed = parsePlanItems(planText);
+  if (!parsed.length) {
     throw validation("Plan must contain at least one task");
   }
 
   const existing = findDailyPlan(state, userId, date);
+
+  // Default is to MERGE new items into today's plan (keeping already-planned
+  // items and their done status), so a short or stray message can never wipe
+  // the day's work. `replace` rebuilds the plan from scratch.
+  let items;
+  if (existing && !replace) {
+    const seen = new Set(existing.items.map((item) => normalizeText(item.title)));
+    const appended = parsed.filter((titleText) => !seen.has(normalizeText(titleText)));
+    items = [...existing.items.map((item) => item.title), ...appended];
+  } else {
+    items = parsed;
+  }
+
   const plan = existing || {
     id: `daily-plan-${userId}-${date}`,
     userId,
@@ -573,11 +586,22 @@ export function buildDailyAssistantContext(state, { targetUsers, now = new Date(
   };
 }
 
+// Header/date fragments that must never become plan items (e.g. a stray
+// "план на дня" must not create an item "дня" that wipes the real plan).
+const PLAN_ITEM_NOISE = new Set([
+  "день", "дня", "сегодня", "завтра", "на день", "на сегодня",
+  "план", "мой план", "todo", "to do", "задачи", "задача",
+]);
+
 function parsePlanItems(text) {
   return String(text)
     .split(/\r?\n|;|•/u)
     .map((item) => item.replace(/^\s*[-*\d.)]+\s*/u, "").trim())
     .filter(Boolean)
+    .filter((item) => {
+      const n = item.toLowerCase().replace(/ё/gu, "е").trim();
+      return n.length >= 2 && !PLAN_ITEM_NOISE.has(n);
+    })
     .slice(0, 20);
 }
 

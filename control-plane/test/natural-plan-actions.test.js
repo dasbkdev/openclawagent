@@ -5,7 +5,16 @@ import {
   parseNaturalDoneIntent,
   matchPlanItemByPhrase,
   isGenericDoneReference,
+  isReplacePlanIntent,
 } from "../src/domain/natural-plan-actions.js";
+
+test("isReplacePlanIntent: replace vs merge wording", () => {
+  assert.ok(isReplacePlanIntent("новый план на сегодня: A; B"));
+  assert.ok(isReplacePlanIntent("очисти план"));
+  assert.ok(isReplacePlanIntent("план заново: X"));
+  assert.equal(isReplacePlanIntent("план на сегодня: A; B"), false);
+  assert.equal(isReplacePlanIntent("добавь C к плану"), false);
+});
 
 test("parseNaturalPlanIntent reads a numbered plan", () => {
   const intent = parseNaturalPlanIntent("План на сегодня\n1. Провести собрание\n2. Созвон с Жакшылыком\n3. Подтвердить график");

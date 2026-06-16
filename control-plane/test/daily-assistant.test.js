@@ -7,12 +7,38 @@ import {
   collectDueDailyAssistantPrompts,
   createOrUpdateDailyPlan,
   ensureDailyAssistantState,
+  findTodayPlanForUser,
   formatDailyProgress,
   getLocalDateKey,
   markDailyPlanItemDone,
 } from "../src/domain/daily-assistant.js";
 import { getUserById } from "../src/domain/policy.js";
 import { createInitialState } from "../src/infra/seed.js";
+
+test("daily plan merges new items and a stray message never wipes it", () => {
+  const now = new Date("2026-06-16T06:00:00.000Z");
+  const state = createInitialState({ BOOTSTRAP_OWNER_TELEGRAM_ID: "999" });
+  const pm = getUserById(state, "u-pm-1");
+  pm.telegram = { telegramUserId: "777", username: "pm1", linkedAt: now.toISOString() };
+
+  createOrUpdateDailyPlan(state, { actor: pm, text: "отчет; канбан; клиент", now });
+  markDailyPlanItemDone(state, { actor: pm, selector: "1", now });
+  const merged = createOrUpdateDailyPlan(state, { actor: pm, text: "почта; звонок", now });
+  assert.deepEqual(merged.items.map((i) => i.title), ["отчет", "канбан", "клиент", "почта", "звонок"]);
+  assert.equal(merged.items[0].status, "done"); // preserved across merge
+
+  // a stray "дня" is filtered to nothing -> throws, plan untouched
+  assert.throws(() => createOrUpdateDailyPlan(state, { actor: pm, text: "дня", now }));
+  assert.equal(findTodayPlanForUser(state, pm.id, now).items.length, 5);
+
+  // re-sending existing items does not duplicate them
+  const again = createOrUpdateDailyPlan(state, { actor: pm, text: "отчет; почта", now });
+  assert.equal(again.items.length, 5);
+
+  // explicit replace rebuilds from scratch
+  const replaced = createOrUpdateDailyPlan(state, { actor: pm, text: "ревью; деплой", replace: true, now });
+  assert.deepEqual(replaced.items.map((i) => i.title), ["ревью", "деплой"]);
+});
 
 test("daily assistant creates plan, marks done, and calculates progress", async () => {
   const now = new Date("2026-06-05T06:00:00.000Z");

@@ -65,6 +65,14 @@ export function parseNaturalPlanIntent(text) {
   return { kind: "create_plan", items, text: raw };
 }
 
+const REPLACE_PLAN = /(нов(ый|ого)\s+план|план\s+заново|заново|перепиш|замени(ть)?\s+план|очисти(ть)?\s+план|с\s+нуля|сначала\s+план)/iu;
+
+// Whether a plan message asks to REPLACE the whole plan rather than add to it.
+// Default is to merge, so a stray message never wipes the day's plan.
+export function isReplacePlanIntent(text) {
+  return REPLACE_PLAN.test(String(text || ""));
+}
+
 export function parseNaturalDoneIntent(text) {
   const raw = String(text || "").trim();
   if (!raw || raw.startsWith("/")) {

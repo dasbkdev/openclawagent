@@ -9106,3 +9106,15 @@ Still pending: 0b plan-parser robustness (a plan got overwritten by garbage item
 + pgvector + profile + summaries). Name-mapping note from user: PM1=Бегайым,
 PM2=Перизат, PM3=Айзирек — but state has u-pm-2=Айзирек/u-pm-3=Перизат (swapped);
 do NOT blindly rewrite identities — confirm before remapping.
+
+## 2026-06-16 - Phase 0b: daily plan no longer wipes itself
+
+Root cause of "plan showed then disappeared": createOrUpdateDailyPlan REPLACED
+plan.items on every message, so a stray "план на дня" parsed to one junk item
+"дня" and overwrote the real plan (seen live: u-pm-1 2026-06-16 = ["дня"]).
+Fix:
+- Default is now MERGE (append new items, dedup by title, preserve done status);
+  replace only on explicit "новый план/заново/очисти план" (isReplacePlanIntent).
+- parsePlanItems drops noise fragments (день/дня/сегодня/завтра/план/задачи…) and
+  <2-char items, so a header-only message can't create junk.
+- Tests: 277 pass (+2).
