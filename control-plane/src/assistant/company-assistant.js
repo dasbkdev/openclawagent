@@ -510,6 +510,7 @@ export async function buildAssistantContext({
 
   return {
     now: now.toISOString(),
+    today: describeToday(now),
     actor: publicUser(actor),
     accessPolicy: describeAccessPolicy(actor.role),
     period,
@@ -917,6 +918,22 @@ function stripRawSchedule(entry) {
   return rest;
 }
 
+const FULL_WEEKDAYS = ["воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"];
+const RU_MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+
+// Explicit, ready-made date facts so the model never computes weekday itself
+// (it reliably gets day-of-week off by one). UTC-based to match `now`.
+function describeToday(now) {
+  const d = now instanceof Date && Number.isFinite(now.getTime()) ? now : new Date();
+  const dow = d.getUTCDay();
+  return {
+    date: d.toISOString().slice(0, 10),
+    weekday: FULL_WEEKDAYS[dow],
+    label: `${FULL_WEEKDAYS[dow]}, ${d.getUTCDate()} ${RU_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
+    weekStartMonday: toWeekStartISO(d),
+  };
+}
+
 // Monday (ISO YYYY-MM-DD, UTC) of the week containing `date`.
 function toWeekStartISO(date) {
   const d = date instanceof Date && Number.isFinite(date.getTime()) ? date : new Date();
@@ -1317,6 +1334,7 @@ function buildSystemPrompt() {
     "For task and project questions, prefer platrum.userTasks and platrum.projectTasks over Bitrix. When the user explicitly asks about Bitrix tasks/kanban, use bitrixBoardTasks for the full current picture.",
     "For employee work schedules and calendar summaries, first check googleWorkspace.users[].sharedCalendars. These are Google 'Other calendars' from connected PM accounts.",
     "context.platrum.schedule — это график работы из Platrum. platrum.schedule.weeklyPlans — недельный план каждого сотрудника на неделю weekStart: days[] с датой, режимом mode (office=офис, online=удалённо, hybrid=гибрид; isOff=true или mode=day_off/off = выходной), временем startTime–endTime, обедом и часами officeHours/onlineHours, status/statusLabel (например утверждён). platrum.schedule.templates — это шаблоны графика («шаблон графика на неделю»): days[] по дням недели (dayName Пн..Вс) с режимом и временем. Для вопросов про график/расписание работы сотрудника (когда работает, во сколько, офис или удалёнка, выходные) используй platrum.schedule.weeklyPlans для конкретной недели, а platrum.schedule.templates — как постоянный график, если недельного плана на эту неделю нет. Используй это ВМЕСТЕ с googleWorkspace.sharedCalendars, а не вместо.",
+    "КРИТИЧНО про даты: НИКОГДА не вычисляй день недели сам — ты ошибаешься. Бери день недели ТОЛЬКО из готовых полей: context.today.label/weekday для сегодня, и поле dayName у каждого дня в platrum.schedule.weeklyPlans[].days и .templates[].days. weekStart в platrum.schedule — это всегда ПОНЕДЕЛЬНИК недели (а не воскресенье). Если в weeklyPlans[].days день с этой датой имеет mode!=day_off и isOff=false — это рабочий день, не выходной; не переназначай его в выходной из-за своих расчётов дня недели.",
     "",
     "RESPONSE FORMAT (strict): Reply with ONLY a single JSON object, no markdown, no code fences, no extra prose before or after it.",
     'Shape: {"title": "...", "sections": [{"heading": "...", "lines": ["...", "..."]}], "next_steps": ["..."]}.',

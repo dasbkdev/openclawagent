@@ -544,6 +544,7 @@ export function normalizePlatrumWeeklyPlan(plan) {
   const source = asArray(plan?.days?.length ? plan.days : plan?.days_plan);
   const days = source.map((day) => ({
     date: stringOrNull(day.date),
+    dayName: weekdayNameFromISO(day.date),
     mode: stringOrNull(day.mode),
     isOff: Boolean(day.is_off) || ["off", "day_off", "dayoff", "weekend"].includes(stringOrNull(day.mode) || ""),
     startTime: normalizeClockTime(day.start_time ?? day.start),
@@ -579,6 +580,21 @@ export function normalizePlatrumWeeklyPlan(plan) {
 }
 
 const WEEKDAY_NAMES = ["", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+// Indexed by Date.getUTCDay() (0 = Sunday). Used so the model never has to
+// compute the weekday of a calendar date itself (it gets it wrong).
+const WEEKDAY_BY_DOW = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
+
+export function weekdayNameFromISO(value) {
+  const text = stringOrNull(value);
+  if (!text) {
+    return null;
+  }
+  const date = new Date(`${text.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) {
+    return null;
+  }
+  return WEEKDAY_BY_DOW[date.getUTCDay()];
+}
 
 export function normalizePlatrumScheduleTemplate(template) {
   const days = asArray(template?.days_plan).map((day) => {

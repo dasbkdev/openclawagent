@@ -8985,3 +8985,20 @@ Fix:
 
 Tests: 258 pass (+5 in test/platrum-schedule.test.js). All Platrum access stays
 GET-only read-only.
+
+## 2026-06-16 - Fix weekday confusion in schedule answers
+
+User report: asked Бегайым's schedule 15-16 Jun (Mon-Tue); the assistant claimed
+15 Jun was Sunday and a day_off. Reality: 15 Jun 2026 = Monday, and her weekly
+plan has 15 Jun = office 09:15-18:15; 20/21 Jun (Sat/Sun) are the day_off. The
+data was correct — the LLM miscomputed day-of-week (off by one: thought today
+16th = Monday) and bent the day_off onto the wrong date.
+
+Fix: stop letting the model compute weekdays.
+- platrum-client.js: weekdayNameFromISO(); normalizePlatrumWeeklyPlan adds
+  dayName per day (templates already had dayName from day_of_week).
+- company-assistant.js: context.today = {date, weekday, label, weekStartMonday}
+  (ready-made). Guidance: NEVER compute weekday yourself — use context.today and
+  days[].dayName; weekStart is always Monday; a day with mode!=day_off/isOff=false
+  is a working day, don't reclassify it as выходной.
+- Tests: 259 pass (+1). Verified live: dayName 06-15->Пн, 06-16->Вт.

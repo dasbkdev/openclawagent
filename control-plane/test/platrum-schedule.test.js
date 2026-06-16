@@ -6,7 +6,15 @@ import {
   assertReadOnlyPlatrumRequest,
   normalizePlatrumScheduleTemplate,
   normalizePlatrumWeeklyPlan,
+  weekdayNameFromISO,
 } from "../src/connectors/platrum-client.js";
+
+test("weekdayNameFromISO returns the correct weekday (15 Jun 2026 is Monday)", () => {
+  assert.equal(weekdayNameFromISO("2026-06-15"), "Пн");
+  assert.equal(weekdayNameFromISO("2026-06-16"), "Вт");
+  assert.equal(weekdayNameFromISO("2026-06-21"), "Вс");
+  assert.equal(weekdayNameFromISO(""), null);
+});
 
 test("admin schedule-template endpoint is in the read-only allowlist", () => {
   const r = assertReadOnlyPlatrumRequest("GET", "/api/v1/work-schedules/admin/templates/");
@@ -38,6 +46,8 @@ test("normalizePlatrumWeeklyPlan reads the dated days[] with mode and hours", ()
   assert.equal(plan.officeHours, 40);
   assert.equal(plan.statusLabel, "Утверждён");
   assert.equal(plan.days.length, 2);
+  assert.equal(plan.days[0].dayName, "Пн");
+  assert.equal(plan.days[1].dayName, "Вс");
   assert.equal(plan.days[0].mode, "office");
   assert.equal(plan.days[0].startTime, "09:00");
   assert.equal(plan.days[0].endTime, "18:00");
