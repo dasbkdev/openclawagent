@@ -122,6 +122,8 @@ export async function handleTelegramMessage({
   claudeClient,
   googleOAuthService,
   voiceService,
+  voyageClient = null,
+  embeddingStore = null,
   message,
   now = new Date(),
 }) {
@@ -542,6 +544,8 @@ export async function handleTelegramMessage({
             bitrixClient,
             platrumClient,
             googleOAuthService,
+            voyageClient,
+            embeddingStore,
             now,
           });
           await sendAssistantAnswer({ telegram, chatId, answer, voiceService, voiceReplyRequested });

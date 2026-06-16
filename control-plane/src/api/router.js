@@ -64,6 +64,8 @@ export function createRouter({
   getTelegramApi,
   getVoiceService,
   getClaudeClient,
+  getVoyageClient,
+  embeddingStore = null,
   googleOAuthService,
   setupService,
 }) {
@@ -74,6 +76,7 @@ export function createRouter({
   const resolveTelegramApi = () => getTelegramApi?.();
   const resolveVoiceService = () => getVoiceService?.();
   const resolveClaudeClient = () => getClaudeClient?.();
+  const resolveVoyageClient = () => getVoyageClient?.() ?? null;
 
   return async function route(request, response) {
     try {
@@ -532,6 +535,8 @@ export function createRouter({
           bitrixClient: resolveBitrixClient(),
           platrumClient: resolvePlatrumClient(),
           googleOAuthService,
+          voyageClient: resolveVoyageClient(),
+          embeddingStore,
         });
         sendJson(response, 200, {
           ok: true,

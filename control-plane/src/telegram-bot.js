@@ -17,6 +17,8 @@ import { sendDueTokenUsageReports } from "./telegram/token-usage-reporter.js";
 import { exportObsidianVault } from "./domain/obsidian-export.js";
 import { exportMemoryGraphSite } from "./domain/memory-graph-site.js";
 import { createVoiceServiceFromEnv } from "./integrations/voice-service.js";
+import { createVoyageClientFromEnv } from "./integrations/voyage-client.js";
+import { createEmbeddingStore } from "./infra/embedding-store.js";
 import { runDueMemorySummaries } from "./domain/assistant-summaries.js";
 import { expireStaleAssistantLoops } from "./domain/assistant-open-loops.js";
 
@@ -28,6 +30,15 @@ await setupService.applyToEnv();
 
 const store = await createStore({ projectRoot, seedFactory: () => createInitialState() });
 const googleOAuthService = createGoogleOAuthService({ setupService });
+// Embedding store for semantic memory — created once (holds its own DB pool).
+// Never let it break boot if Postgres/voyage aren't ready.
+let embeddingStore = null;
+try {
+  embeddingStore = await createEmbeddingStore({ projectRoot });
+  console.log(`embedding store ready (${embeddingStore.backend})`);
+} catch (error) {
+  console.error("embedding store unavailable:", error instanceof Error ? error.message : error);
+}
 const createMetriconClient = async () => {
   await setupService.applyToEnv(process.env, { overwrite: true });
   return createKickidlerClientFromEnv(process.env, {
@@ -144,6 +155,8 @@ while (true) {
           platrumClient: createPlatrumClientFromEnv(),
           claudeClient: createClaudeClientFromEnv(),
           voiceService: createVoiceServiceFromEnv(),
+          voyageClient: createVoyageClientFromEnv(),
+          embeddingStore,
         }),
       })
         .catch((error) => console.error(`update ${update.update_id} failed:`, error instanceof Error ? error.message : error))

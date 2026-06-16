@@ -8,6 +8,8 @@ import { createKickidlerClientFromEnv } from "./connectors/kickidler-client.js";
 import { createPlatrumClientFromEnv } from "./connectors/platrum-client.js";
 import { createGoogleOAuthService } from "./integrations/google-oauth.js";
 import { createVoiceServiceFromEnv } from "./integrations/voice-service.js";
+import { createVoyageClientFromEnv } from "./integrations/voyage-client.js";
+import { createEmbeddingStore } from "./infra/embedding-store.js";
 import { loadEnvFile } from "./infra/env.js";
 import { createInitialState } from "./infra/seed.js";
 import { createStore } from "./infra/store-factory.js";
@@ -37,7 +39,14 @@ const getPlatrumClient = () => createPlatrumClientFromEnv();
 const getTelegramApi = () => new TelegramBotApi({ token: process.env.TELEGRAM_BOT_TOKEN });
 const getVoiceService = () => createVoiceServiceFromEnv();
 const getClaudeClient = () => createClaudeClientFromEnv();
+const getVoyageClient = () => createVoyageClientFromEnv();
 const googleOAuthService = createGoogleOAuthService({ setupService });
+let embeddingStore = null;
+try {
+  embeddingStore = await createEmbeddingStore({ projectRoot });
+} catch (error) {
+  console.error("embedding store unavailable:", error instanceof Error ? error.message : error);
+}
 const router = createRouter({
   store,
   getKickidlerClient,
@@ -46,6 +55,8 @@ const router = createRouter({
   getTelegramApi,
   getVoiceService,
   getClaudeClient,
+  getVoyageClient,
+  embeddingStore,
   googleOAuthService,
   setupService,
 });

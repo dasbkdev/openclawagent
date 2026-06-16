@@ -9118,3 +9118,23 @@ Fix:
 - parsePlanItems drops noise fragments (день/дня/сегодня/завтра/план/задачи…) and
   <2-char items, so a header-only message can't create junk.
 - Tests: 277 pass (+2).
+
+## 2026-06-16 - Memory overhaul M1/M2: Voyage embeddings + semantic recall
+
+- Voyage key stored ENCRYPTED in the prod secret store (/var/lib/.../secrets.json),
+  never in git/env/logs. Verified live: dim 1024, correct semantic ranking.
+- infra/embedding-store.js: embeddings cached in a dedicated Postgres table
+  (memory_embeddings, plain jsonb — no pgvector needed at this scale; cosine in
+  Node) so the 1024-dim vectors never bloat the single state jsonb row. File
+  fallback in dev.
+- domain/semantic-memory.js: retrieveRelevantFacts — embeds a user's distilled
+  facts (lazy, cached), embeds the question, returns top-K by cosine. Safe no-op
+  without Voyage.
+- company-assistant: context.semanticMemory = facts most relevant to THIS
+  question across actor + target users (not just recent); guidance added. Wired
+  through answerCompanyAssistant + buildAssistantContext; clients created once in
+  telegram-bot.js and server.js (bot + API processes), passed via router too.
+- Tests: 283 pass (+10 voyage/semantic). Distiller already on Sonnet (was Haiku).
+
+Next memory stages (optional): per-user profile section, rolling conversation
+summary, embed facts on write (distiller) instead of lazy-on-read.

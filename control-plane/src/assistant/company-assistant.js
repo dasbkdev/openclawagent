@@ -7,6 +7,8 @@ import {
   drainEvictedMemoryEvents,
   recordAssistantMemoryEvent,
 } from "../domain/assistant-memory.js";
+import { listAssistantFacts } from "../domain/assistant-facts.js";
+import { retrieveRelevantFacts } from "../domain/semantic-memory.js";
 import { distillAssistantMemory } from "./memory-distiller.js";
 import { appendMemoryArchive } from "../infra/memory-archive.js";
 import { appendTimelineEvent } from "../domain/work-timeline.js";
@@ -46,6 +48,8 @@ export async function answerCompanyAssistant({
   bitrixClient,
   platrumClient,
   googleOAuthService,
+  voyageClient = null,
+  embeddingStore = null,
   now = new Date(),
 }) {
   const trimmedQuestion = String(question || "").trim();
@@ -67,6 +71,8 @@ export async function answerCompanyAssistant({
     platrumClient,
     googleOAuthService,
     claudeClient,
+    voyageClient,
+    embeddingStore,
     dataFilePath: store.filePath || null,
     now,
   });
@@ -453,6 +459,8 @@ export async function buildAssistantContext({
   platrumClient,
   googleOAuthService,
   claudeClient = null,
+  voyageClient = null,
+  embeddingStore = null,
   dataFilePath = null,
   now = new Date(),
 }) {
@@ -485,6 +493,27 @@ export async function buildAssistantContext({
     dataFilePath,
   });
   const recentDeviceCommands = buildRecentDeviceCommandMemory(state, { actor, targetUsers });
+
+  // Semantic memory: pull the facts most relevant to THIS question (by Voyage
+  // embedding similarity) across the actor + target users, instead of only the
+  // most recent ones. Safe no-op when Voyage is not configured.
+  let semanticMemory = [];
+  if (voyageClient?.configured && embeddingStore) {
+    try {
+      const factUserIds = [actor.id, ...targetUsers.map((user) => user.id)];
+      const facts = listAssistantFacts(state, { userIds: factUserIds, limit: 200 });
+      semanticMemory = await retrieveRelevantFacts({
+        embeddingStore,
+        voyage: voyageClient,
+        facts,
+        question,
+        k: 8,
+        minScore: 0.3,
+      });
+    } catch {
+      semanticMemory = [];
+    }
+  }
 
   // Web research: for questions needing current internet information (news,
   // prices, weather, "найди в интернете"…), let Claude search and read the web
@@ -527,6 +556,7 @@ export async function buildAssistantContext({
     googleWorkspace,
     dailyAssistant,
     memory,
+    semanticMemory,
     recentDeviceCommands,
     workHistory,
     webResearch,
@@ -1325,6 +1355,7 @@ function buildSystemPrompt() {
     "Эффективность по задачам считай как completed / total * 100 только из задач, где сотрудник — исполнитель.",
     "Если в контексте есть context.workHistory — это полная хронология работы сотрудника за период из timeline (диалоги, действия агента, задачи созданы/назначены/завершены, отчёты). Для вопросов вида «что делал(а) за месяц/неделю», «история», «чем занимался» опирайся ПРЕЖДЕ ВСЕГО на workHistory: перечисли реальные события по дням/категориям, сколько задач завершено/поставлено, с кем работал. Не выдумывай — бери факты из workHistory.users[].days и totals.",
     "Если в контексте есть context.webResearch — это свежие данные из интернета по вопросу (summary + sources). Для вопросов про новости, цены/курсы, погоду, актуальные события и любые запросы «найди в интернете» опирайся на context.webResearch.summary и кратко укажи источники (домены) из context.webResearch.sources. Не выдумывай факты поверх найденного.",
+    "context.semanticMemory — это факты о сотруднике(ах), наиболее РЕЛЕВАНТНЫЕ текущему вопросу (подобраны по смыслу, не по свежести): обещания/коммитменты, предпочтения, привычки, контекст проектов (поле text, category, score). Используй их как долговременную память: если в semanticMemory есть подходящий факт — учитывай его в ответе (например «ты обещал…», «ты предпочитаешь…»). Не выдумывай факты сверх списка.",
     "Не упоминай системные токены, секреты, внутренние webhook-и или пароли.",
     "Never claim that you sent, queued, executed or completed a local device command. Real desktop actions are handled by the server before Claude is called.",
     "Пиши для Telegram: короткий заголовок, затем понятные секции; без Markdown-таблиц, JSON, сырого debug-контекста и непонятных символов.",
