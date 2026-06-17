@@ -1,0 +1,16 @@
+{
+  "_comment": "Single source of truth for the desktop-agent update manifest (releases.json). Bump version/notes here, drop the matching artifact into public/downloads, then run make-releases-manifest.mjs (or publish-desktop-release.sh). SHA-256 is computed from the real file — never hand-edited.",
+  "downloadsDir": "../../public/downloads",
+  "platforms": {
+    "windows": {
+      "version": "2026.6.7",
+      "file": "starlab-openclaw-agent-windows.exe",
+      "notes": "Reliable YouTube direct-video playback, contextual numeric retry choices, autostart and verified update downloads."
+    },
+    "macos": {
+      "version": "2026.6.5",
+      "file": "starlab-openclaw-agent-macos-universal.dmg",
+      "notes": "Current public macOS build. The 2026.6.6/2026.6.7 source is ready for the next CI/Mac build."
+    }
+  }
+}

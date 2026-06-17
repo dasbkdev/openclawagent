@@ -9151,3 +9151,50 @@ hallucinated about Platrum); also wanted delete of a plan item / whole plan.
 - handler: maybeAddToPlan + maybeDeletePlan wired before plan-create; merge
   keeps statuses; replies show the updated plan / ask which item when unclear.
   All user text escaped. Tests: 288 pass.
+
+## 2026-06-17 - Desktop-agent release tooling + macOS catch-up investigation
+
+User: "сделай актуальную версию для мака чтобы догнал винду, и посмотри что
+улучшить." Windows ships 2026.6.7, macOS public DMG stuck at 2026.6.5.
+
+### Investigation (key, non-obvious topology)
+- The shipped agents are NOT `control-plane/desktop-agent/` (that Electron app is
+  v0.2.0 LEGACY/superseded; `.github/workflows/build-desktop-agents.yml` builds it
+  — a trap: green CI ≠ real product).
+- Real Windows agent = Electron `openclaw-starlab-2026.6.5/apps/windows/`
+  (package.json version 2026.6.7) — builds on Windows.
+- Real macOS agent = native Swift app `apps/macos/Sources/OpenClaw/` + Starlab files
+  (StarlabAgentClient/Window/DeviceCommandExecutor.swift, MenuBar patch). Builds
+  ONLY on a Mac (Xcode/Swift → OpenClaw.app → hdiutil → ...-macos-universal.dmg).
+- BLOCKER: the full, current macOS source is not reachable from Windows. The
+  vendored `openclaw-starlab-2026.6.5/apps/macos` is MISSING the main
+  `Sources/OpenClaw` executable target entirely (only OpenClawIPC/Discovery/MacCLI
+  vendored). The customised source lives only in asik's Mac `~/agent/openclaw`
+  (gitignored). `OPENCLAW_STARLAB_DEVICE_CONTROL.patch` is a partial ~2026.6.5
+  snapshot. No swift/xcodebuild/hdiutil on Windows; no reachable Mac; gh absent.
+- Parity gap macOS 2026.6.5 → Windows 2026.6.7: play_youtube, minimize_window,
+  minimize_all, full auto-update install, Launch-at-Login.
+
+### Decision (user): cloud CI on macos-latest + releases.json generator/deploy.
+
+### Built (verifiable, no Mac needed) — control-plane/scripts/release/
+- `desktop-releases.config.json` — single source of truth (version/notes/file per
+  platform). Stops the win/mac manifest drift.
+- `make-releases-manifest.mjs` — zero-dep generator → public/downloads/releases.json.
+  SHA-256 ALWAYS computed from the real artifact; absent platform carries over its
+  previous entry (updating mac never wipes win). Tested locally: real-SHA path +
+  carry-over path both correct.
+- `publish-desktop-release.sh` — turnkey: scp artifact to prod, regenerate manifest
+  server-side from the byte-identical file (node /usr/bin/node v22 confirmed on
+  server), backup prev manifest, chown, verify HTTPS 200 + content-length. DRY_RUN
+  tested (no prod contact). bash -n clean.
+- `README.md` — runbook incl. the ONE-TIME Mac step to unblock cloud CI: push the
+  full ~/agent/openclaw fork (with apps/macos/Sources/OpenClaw/*) to a GitHub repo
+  that has `starlab-desktop-build.yml`, run the macOS DMG job, download artifact,
+  then bump config macOS→2026.6.7 and run publish-desktop-release.sh.
+
+### NOT done (hard external dependency)
+- The macOS 2026.6.7 binary itself — cannot be produced without the Mac source in
+  a CI-reachable repo (or a physical Mac). Handed off as the documented one-time step.
+- Pending improvements offered but not started: remove legacy desktop-agent + its CI;
+  document unsigned-mac Gatekeeper flow; commit desktop source to repo / submodule.
