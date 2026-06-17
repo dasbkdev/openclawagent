@@ -9198,3 +9198,35 @@ User: "сделай актуальную версию для мака чтобы
   a CI-reachable repo (or a physical Mac). Handed off as the documented one-time step.
 - Pending improvements offered but not started: remove legacy desktop-agent + its CI;
   document unsigned-mac Gatekeeper flow; commit desktop source to repo / submodule.
+
+## 2026-06-17 - Cloud-CI macOS build (no physical Mac) — path A set up
+
+User has no Mac; chose cloud build. Key discovery: a physical Mac is NOT needed —
+GitHub's macos-latest runner is a cloud Mac, and the full buildable source is
+reconstructable on Windows.
+
+### Validated on Windows (cannot compile Swift, but the assembly is proven)
+- Upstream `github.com/openclaw/openclaw` is cloned locally at C:\Users\dasmu\openclaw
+  (full mac app target, 238 Swift files). After `git fetch --tags` it has CLEAN tags
+  incl. `v2026.6.5`, `v2026.6.6`, `v2026.6.7-beta.*`.
+- `git apply` of OPENCLAW_STARLAB_DEVICE_CONTROL.patch FAILS (CRLF + strict context),
+  but tolerant `patch -p1 --fuzz=3` applies the WHOLE patch at v2026.6.5 with **0
+  failed hunks**. The 5 "conflicting" edits are tiny additive hooks (~47 lines total).
+- Post-patch at v2026.6.5: version=2026.6.5, npm script `starlab:mac:package` present,
+  scripts/package-mac-dist.sh + package-starlab-mac-dist.sh present, pnpm@11.2.2.
+  Recipe: clone upstream@tag -> patch --fuzz=3 -> pnpm install -> pnpm starlab:mac:package
+  (SKIP_NOTARIZE=1 ALLOW_ADHOC_SIGNING=1) -> dist/...macos-universal.dmg.
+
+### Added
+- `.github/workflows/starlab-mac-dmg.yml` (repo root, so Actions runs it):
+  workflow_dispatch (inputs upstream_tag=v2026.6.5, version=2026.6.5) on macos-latest;
+  clones upstream, applies the committed patch, pnpm install, builds ad-hoc DMG,
+  uploads artifact. Manual-only to control macOS-minute spend (GitHub bills mac 10x).
+- README in scripts/release updated with the validated recipe + web-UI steps + honest
+  caveats (mac minutes cost on private repos; blind CI iteration; result is 2026.6.5
+  feature level — 6.6/6.7 deltas play_youtube/minimize/updater/autostart are follow-up).
+
+### Still needs the user / first CI run
+- Run the workflow in GitHub Actions (needs Actions enabled + macOS minutes). The Swift
+  build can't be verified from Windows — first run is the real test, may need log-driven
+  fixes. Then publish the DMG via publish-desktop-release.sh.

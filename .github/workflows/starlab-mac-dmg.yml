@@ -1,0 +1,86 @@
+name: Starlab macOS DMG (cloud build)
+
+# Builds the Starlab-customised OpenClaw macOS agent on a GitHub-hosted Mac
+# (no physical Mac required). Recipe validated on Windows against tag v2026.6.5:
+#   clone upstream openclaw@<tag>  ->  apply OPENCLAW_STARLAB_DEVICE_CONTROL.patch
+#   (patch -p1 --fuzz=3, 0 failed hunks)  ->  pnpm install  ->  starlab:mac:package
+#
+# Manual-dispatch only, to control macOS minute spend (GitHub bills macOS at 10x).
+# After it finishes: download the artifact, then publish with
+# control-plane/scripts/release/publish-desktop-release.sh.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: "Upstream openclaw tag to base the build on"
+        required: true
+        default: "v2026.6.5"
+      version:
+        description: "Version to stamp into package.json"
+        required: true
+        default: "2026.6.5"
+
+jobs:
+  macos-dmg:
+    name: Build macOS DMG
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout agent repo (for the Starlab patch)
+        uses: actions/checkout@v4
+        with:
+          path: agent
+
+      - name: Clone upstream OpenClaw at ${{ inputs.upstream_tag }}
+        run: |
+          git clone --depth 1 --branch "${{ inputs.upstream_tag }}" \
+            https://github.com/openclaw/openclaw.git openclaw
+
+      - name: Apply Starlab customisations
+        run: |
+          cd openclaw
+          patch -p1 --fuzz=3 < "$GITHUB_WORKSPACE/agent/OPENCLAW_STARLAB_DEVICE_CONTROL.patch"
+          # Stamp the requested version (idempotent; patch already sets one).
+          node -e "const f='package.json',p=require('./'+f);p.version='${{ inputs.version }}';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+          echo "Version: $(node -p "require('./package.json').version")"
+
+      - name: Setup Node + pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Enable corepack (pnpm@11.2.2)
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: openclaw
+        run: pnpm install --frozen-lockfile || pnpm install
+
+      - name: Build macOS app + DMG (ad-hoc signed)
+        working-directory: openclaw
+        env:
+          SKIP_NOTARIZE: "1"
+          ALLOW_ADHOC_SIGNING: "1"
+          SKIP_TEAM_ID_CHECK: "1"
+        run: pnpm starlab:mac:package
+
+      - name: Locate DMG
+        id: dmg
+        working-directory: openclaw
+        run: |
+          path="dist/starlab-openclaw-agent-macos-universal.dmg"
+          if [ ! -f "$path" ]; then
+            echo "Expected DMG missing; listing dist/:" >&2
+            ls -la dist || true
+            path="$(ls dist/*.dmg | head -1)"
+          fi
+          echo "path=openclaw/$path" >> "$GITHUB_OUTPUT"
+          shasum -a 256 "$path" || true
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: starlab-openclaw-agent-macos-${{ inputs.version }}
+          path: ${{ steps.dmg.outputs.path }}
+          if-no-files-found: error

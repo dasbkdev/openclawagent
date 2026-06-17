@@ -37,24 +37,41 @@ source lives only in the Mac working tree (`~/agent/openclaw`) — it is *not* i
 this repo (the vendored `openclaw-starlab-2026.6.5/apps/macos` is missing the
 main `Sources/OpenClaw` app target) and `openclaw/` is gitignored.
 
-### Chosen path: cloud CI on `macos-latest`
+### Chosen path: cloud CI on `macos-latest` — NO physical Mac, NO separate fork
 
-The build pipeline already exists: workflow `starlab-desktop-build.yml` +
-`scripts/package-starlab-mac-dist.sh` + npm script `starlab:mac:package`
-(`SKIP_NOTARIZE=1 ALLOW_ADHOC_SIGNING=1 pnpm starlab:mac:package` →
-`dist/starlab-openclaw-agent-macos-universal.dmg`). It only needs the source in
-a CI-reachable repo. **One-time setup (must run on the Mac, by whoever holds the
-working tree — asik/Maksat):**
+GitHub's `macos-latest` runner *is* a cloud Mac. The workflow
+`.github/workflows/starlab-mac-dmg.yml` (in THIS repo) builds the DMG with zero
+local Mac. Recipe, validated on Windows against tag `v2026.6.5` (0 failed hunks):
 
-1. From `~/agent/openclaw`, bump `package.json` version to match Windows (`2026.6.7`).
-2. Push that fork (full tree, incl. `apps/macos/Sources/OpenClaw/*` and the
-   `Starlab*` files) to a private GitHub repo that has Actions enabled, with
-   `.github/workflows/starlab-desktop-build.yml` present.
-3. Trigger the **macOS DMG** job (push to `server`/`main`, or `workflow_dispatch`).
-4. Download the `starlab-openclaw-agent-macos` artifact.
+```
+git clone --depth 1 --branch v2026.6.5 https://github.com/openclaw/openclaw.git
+cd openclaw
+patch -p1 --fuzz=3 < ../OPENCLAW_STARLAB_DEVICE_CONTROL.patch   # Starlab overlay
+corepack enable && pnpm install
+SKIP_NOTARIZE=1 ALLOW_ADHOC_SIGNING=1 pnpm starlab:mac:package  # -> dist/...universal.dmg
+```
 
-Then, from this repo: bump `desktop-releases.config.json` macOS → `2026.6.7`
-and run `./publish-desktop-release.sh <downloaded>.dmg`.
+The committed `OPENCLAW_STARLAB_DEVICE_CONTROL.patch` carries the whole Starlab
+overlay (mac Swift client/executor/window + MenuBar/menu hooks, apps/windows,
+scripts, npm script). No need to push a separate fork — the workflow clones
+upstream and applies the patch itself.
+
+**To produce a DMG (all in the GitHub web UI):**
+
+1. Actions → **Starlab macOS DMG (cloud build)** → *Run workflow* (defaults:
+   `upstream_tag=v2026.6.5`, `version=2026.6.5`).
+2. When green, download the `starlab-openclaw-agent-macos-<version>` artifact.
+3. From this repo: set `desktop-releases.config.json` macOS `version` + drop the
+   `.dmg` in `public/downloads/`, then `./publish-desktop-release.sh <downloaded>.dmg`.
+
+Caveats (honest):
+- **macOS minutes cost.** On a *private* repo GitHub bills macOS at 10×; the free
+  2000 min/mo ≈ 200 macOS-min, and a full Swift+Sparkle+Peekaboo build is tens of
+  minutes — a handful of runs/month before it's billed. Public repos: free.
+- **First runs may need iteration.** The Swift build can't be compiled on Windows;
+  if CI errors, fix from the logs and re-run.
+- This produces a **2026.6.5-feature** Starlab agent. To reach Windows 2026.6.7
+  parity, add the deltas below to the overlay (then refresh the patch).
 
 The DMG is **ad-hoc signed** (no Apple Developer ID), so first launch needs
 right-click → Open (Gatekeeper). A real `Developer ID Application` cert removes
