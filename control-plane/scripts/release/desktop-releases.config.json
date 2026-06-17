@@ -8,9 +8,9 @@
       "notes": "Reliable YouTube direct-video playback, contextual numeric retry choices, autostart and verified update downloads."
     },
     "macos": {
-      "version": "2026.6.5",
+      "version": "2026.6.7",
       "file": "starlab-openclaw-agent-macos-universal.dmg",
-      "notes": "Current public macOS build. The 2026.6.6/2026.6.7 source is ready for the next CI/Mac build."
+      "notes": "Caught up to Windows: device-control parity plus play_youtube, minimize_window/all. Universal (Apple Silicon + Intel), ad-hoc signed (first launch: right-click → Open)."
     }
   }
 }

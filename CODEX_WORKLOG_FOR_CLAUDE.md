@@ -9230,3 +9230,48 @@ reconstructable on Windows.
 - Run the workflow in GitHub Actions (needs Actions enabled + macOS minutes). The Swift
   build can't be verified from Windows — first run is the real test, may need log-driven
   fixes. Then publish the DMG via publish-desktop-release.sh.
+
+## 2026-06-17 - macOS 2026.6.7 BUILT on a real Mac + SHIPPED (mac caught up to Windows)
+
+User brought Maksat's MacBook and set up SSH. Built directly on it (path B), which
+turned out cleaner than cloud CI.
+
+### Mac access (reusable)
+- SSH key on Windows: ~/.ssh/maksat_mac (ed25519). Mac: maksatsultanaliev@<LAN-IP>
+  (was 192.168.88.126; LAN IP varies). macOS 26.5.1, arm64, Xcode 26.5.
+- Gotchas hit: client-isolation Wi-Fi (devices couldn't see each other → switched
+  network); macOS git/swift refuse to run until `sudo xcodebuild -license accept`
+  (user ran it); no brew/node → installed Node 22 standalone to ~/node (PATH only in
+  ~/.zprofile, so bash -l needs `export PATH=$HOME/node/bin:$PATH`); `timeout` absent.
+
+### Build recipe (validated end-to-end on the Mac)
+- clone upstream openclaw@v2026.6.5 -> apply patch. NOTE: BSD `patch` on macOS chokes
+  on the CRLF patch; fix = `tr -d '\r' < patch > lf.patch` first, then
+  `patch -p1 --fuzz=3` (Swift files apply 0-fail; the package.json scripts hunk fails —
+  add `starlab:mac:package` via node). Then `pnpm install` (1m39s) + `pnpm starlab:mac:package`.
+- Build is ~30 min cold (universal arm64+x86_64 + Sparkle + Peekaboo + swift-syntax).
+  Disk on the Mac is tight (~12 GB) but pnpm/store dedup keeps it OK.
+- STALL FIX: the Sparkle step re-runs `pnpm install --frozen-lockfile` and hangs
+  retrying OPTIONAL platform binaries (claude-agent-sdk-*) on flaky CDN (error 23).
+  Fix = `echo prefer-offline=true >> ~/.npmrc` (deps already in store from first install).
+
+### 2026.6.7 feature deltas added (Swift, compiler-verified)
+- control-plane/scripts/release/mac-2026.6.7-deltas.py applies to the Mac source:
+  StarlabAgentClient.swift caps += play_youtube/minimize_window/minimize_all;
+  StarlabDeviceCommandExecutor.swift += those 3 cases + helpers (play_youtube resolves
+  a videoId from YouTube search HTML like the Windows agent, opens watch?autoplay=1;
+  minimize_window = Cmd+M; minimize_all = AXMinimized over all visible apps).
+  `swiftc -parse` clean; full rebuild green.
+
+### Shipped
+- Built OpenClaw.app/DMG version 2026.6.7 (universal, ad-hoc signed),
+  starlab-openclaw-agent-macos-universal.dmg, 63,675,541 bytes,
+  sha256 6b756df2fb093895f01c4e28951c3d02caec3e77d7edd075a47df7452e99be31.
+- Published via publish-desktop-release.sh: uploaded to prod, releases.json regenerated
+  server-side (macOS now 2026.6.7, Windows carried over), HTTPS verified 200 + length.
+  Clients auto-update within 6h. mac == win == 2026.6.7.
+
+### Still pending (smaller)
+- macOS autostart (Launch-at-Login) + full auto-update INSTALL flow not added this pass
+  (device-action parity done). Can add to the overlay next, now that the Mac builds.
+- Legacy control-plane/desktop-agent + build-desktop-agents.yml still present (cleanup offered).
