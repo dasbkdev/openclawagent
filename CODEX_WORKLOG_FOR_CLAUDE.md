@@ -9275,3 +9275,38 @@ turned out cleaner than cloud CI.
 - macOS autostart (Launch-at-Login) + full auto-update INSTALL flow not added this pass
   (device-action parity done). Can add to the overlay next, now that the Mac builds.
 - Legacy control-plane/desktop-agent + build-desktop-agents.yml still present (cleanup offered).
+
+## 2026-06-18 - Hardening batch (plumbing): token budget + SSRF guard (deployed)
+
+From the risk report; user approved the "plumbing" (zero-behaviour-change) items
+plus a token cap of 2.2M/24h.
+
+### Token budget (per-user 2.2M / rolling 24h)
+- token-usage.js: getUserTokenUsage (trailing-window sum), checkUserTokenBudget,
+  enforceUserTokenBudget (OWNER exempt from hard block), DEFAULT 2_200_000,
+  override TOKEN_USER_DAILY_LIMIT.
+- Gated at both spend points: answerCompanyAssistant (returns friendly refusal
+  {html,plainText}) and runAgentTask (ok:false). Distiller intentionally unmetered.
+- Tests +2. Commit 9ed2748.
+
+### SSRF guard (closes the top P0 chain)
+- browse_web -> browser-service could reach 127.0.0.1:3099 / 169.254.169.254 / LAN.
+- browser-service/validate.js: isPublicWebUrl/isBlockedHost block localhost, 127/8,
+  10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10, multicast, ::1, fc00::/7,
+  fe80::/10, IPv4-mapped v6. Applied to top-level url + goto steps.
+- browser.js: assertPublicUrl resolves host before page.goto, rejects private
+  resolved IPs (anti-DNS-rebinding).
+- Tests +3 (browser-service suite 27 pass). Commit 679b045.
+
+### Deployed
+- Pushed server, ran deploy-from-git.sh: 290 control-plane tests pass, api+bot+
+  browser-service restarted, health ok. Live at 679b045.
+
+### Remaining plumbing (not yet done)
+- Postgres automated backups + restore check (highest protective value).
+- Deploy health-gate + rollback automation.
+- State: replace agent-loop 1s full-state poll with a narrow read; keep slow I/O
+  out of the advisory-locked mutator.
+- Internal auth signing (X-Actor-Telegram-Id) — lower urgency now SSRF chain closed;
+  do carefully (touches bot<->API + n8n).
+- macOS auto-update wiring + autostart (needs a Mac rebuild).
