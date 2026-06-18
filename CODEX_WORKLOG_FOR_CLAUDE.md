@@ -9302,8 +9302,27 @@ plus a token cap of 2.2M/24h.
 - Pushed server, ran deploy-from-git.sh: 290 control-plane tests pass, api+bot+
   browser-service restarted, health ok. Live at 679b045.
 
+## 2026-06-18 - Backups fixed: now dump Postgres + restore-verified (deployed)
+
+DISCOVERY: backups were broken AND backing up the wrong thing. The systemd
+backup.service had been failing since Jun 15 (203/EXEC — backup-runtime.sh lost
+its +x bit; git had it as 100644), and even when it ran it only tar'd the file
+data dir — the Postgres DB (controlplane in container starlab-cp-postgres), where
+state actually lives, was NOT backed up at all.
+
+Fixes (commits d7d896b, 1c7789c; deployed):
+- backup-runtime.sh now pg_dumps the DB via `docker exec starlab-cp-postgres`
+  (gzip, --clean --if-exists) with gzip -t + control_plane_state sanity, keeps the
+  runtime-dir tar for derived files, rotates 14 of each.
+- Bug fixed mid-deploy: sanity used `gzip -dc | grep -q` → grep -q SIGPIPEs gzip →
+  under `set -o pipefail` the pipeline falsely "failed". Switched to `grep -c` count.
+- install-backup-timer.sh ExecStart -> `/bin/bash $SCRIPT` so a lost +x can never
+  recur; restored +x in git (100644 -> 100755).
+- Verified on prod: service Result=success; pg-*.sql.gz (536K) + runtime tar made;
+  RESTORE TEST into a scratch DB: 0 errors, control_plane_state=1, memory_embeddings=77,
+  users=5. Daily timer active (Fri 03:30 UTC next).
+
 ### Remaining plumbing (not yet done)
-- Postgres automated backups + restore check (highest protective value).
 - Deploy health-gate + rollback automation.
 - State: replace agent-loop 1s full-state poll with a narrow read; keep slow I/O
   out of the advisory-locked mutator.
