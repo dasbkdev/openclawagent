@@ -6,7 +6,7 @@ import {
   listVisibleDeviceAgents,
 } from "../domain/device-agents.js";
 import { validation } from "../domain/errors.js";
-import { recordTokenUsageEvent } from "../domain/token-usage.js";
+import { enforceUserTokenBudget, recordTokenUsageEvent } from "../domain/token-usage.js";
 import { appendAuditEvent } from "../infra/audit.js";
 import { appendTimelineEvent } from "../domain/work-timeline.js";
 
@@ -147,6 +147,12 @@ export async function runAgentTask({
   }
   if (!claudeClient?.configured) {
     return { ok: false, summary: "Claude API не настроен — задача не может быть выполнена.", steps: [] };
+  }
+
+  // Per-user 24h token budget — device tasks spend planner tokens too.
+  const budgetGate = enforceUserTokenBudget(await store.load(), actor, { now });
+  if (!budgetGate.allowed) {
+    return { ok: false, summary: budgetGate.message, steps: [] };
   }
 
   const platform = device?.platform || "unknown";

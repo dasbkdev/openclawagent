@@ -2,11 +2,51 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildTokenUsageSummary,
+  checkUserTokenBudget,
+  DEFAULT_USER_DAILY_TOKEN_LIMIT,
+  enforceUserTokenBudget,
   formatTokenUsageSummary,
+  getUserTokenUsage,
   recordTokenUsageEvent,
   resolveTokenUsagePeriod,
 } from "../src/domain/token-usage.js";
 import { createInitialState } from "../src/infra/seed.js";
+import { getUserById } from "../src/domain/policy.js";
+
+test("per-user 24h token budget: window sum, hard block, owner exempt", () => {
+  const now = new Date("2026-06-10T12:00:00Z");
+  const state = createInitialState({ BOOTSTRAP_OWNER_TELEGRAM_ID: "999" });
+
+  // within window counts; older-than-24h and other users are ignored
+  recordTokenUsageEvent(state, { occurredAt: "2026-06-10T06:00:00Z", userId: "u-pm-1", action: "a", totalTokens: 1_500_000 }, { now });
+  recordTokenUsageEvent(state, { occurredAt: "2026-06-09T06:00:00Z", userId: "u-pm-1", action: "a", totalTokens: 5_000_000 }, { now }); // >24h ago
+  recordTokenUsageEvent(state, { occurredAt: "2026-06-10T06:00:00Z", userId: "u-maksat", action: "a", totalTokens: 9_000_000 }, { now });
+
+  assert.equal(getUserTokenUsage(state, "u-pm-1", { now }), 1_500_000);
+
+  const under = checkUserTokenBudget(state, "u-pm-1", { now });
+  assert.equal(under.limit, DEFAULT_USER_DAILY_TOKEN_LIMIT);
+  assert.equal(under.exceeded, false);
+  assert.equal(enforceUserTokenBudget(state, getUserById(state, "u-pm-1"), { now }).allowed, true);
+
+  // push the PM over the 2.2M limit
+  recordTokenUsageEvent(state, { occurredAt: "2026-06-10T11:00:00Z", userId: "u-pm-1", action: "a", totalTokens: 800_000 }, { now });
+  const over = enforceUserTokenBudget(state, getUserById(state, "u-pm-1"), { now });
+  assert.equal(over.allowed, false);
+  assert.match(over.message, /лимит токенов/i);
+
+  // owner is never hard-blocked even when over
+  recordTokenUsageEvent(state, { occurredAt: "2026-06-10T11:00:00Z", userId: "u-nikolay", action: "a", totalTokens: 9_000_000 }, { now });
+  assert.equal(enforceUserTokenBudget(state, getUserById(state, "u-nikolay"), { now }).allowed, true);
+});
+
+test("token budget honours TOKEN_USER_DAILY_LIMIT override", () => {
+  const now = new Date("2026-06-10T12:00:00Z");
+  const state = createInitialState({ BOOTSTRAP_OWNER_TELEGRAM_ID: "999" });
+  recordTokenUsageEvent(state, { occurredAt: "2026-06-10T11:00:00Z", userId: "u-pm-1", action: "a", totalTokens: 600 }, { now });
+  const gate = enforceUserTokenBudget(state, getUserById(state, "u-pm-1"), { now, env: { TOKEN_USER_DAILY_LIMIT: "500" } });
+  assert.equal(gate.allowed, false);
+});
 
 test("token usage records and summarizes by user, action, and model", () => {
   const state = createInitialState();

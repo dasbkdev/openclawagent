@@ -17,7 +17,7 @@ import { buildWorkHistoryReport, parseHistoryPeriod, isWorkHistoryRequest } from
 import { listVisibleDeviceAgents } from "../domain/device-agents.js";
 import { unauthorized } from "../domain/errors.js";
 import { appendAuditEvent } from "../infra/audit.js";
-import { recordTokenUsageEvent } from "../domain/token-usage.js";
+import { enforceUserTokenBudget, recordTokenUsageEvent } from "../domain/token-usage.js";
 import {
   canAccessProject,
   listAccessibleUserIds,
@@ -62,6 +62,13 @@ export async function answerCompanyAssistant({
   const actor = actorUserId
     ? resolveActorByUserId(state, actorUserId)
     : resolveActorByTelegramId(state, telegramUserId);
+
+  // Per-user 24h token budget. Block before spending on context/Claude.
+  const budgetGate = enforceUserTokenBudget(state, actor, { now });
+  if (!budgetGate.allowed) {
+    return { html: markdownToTelegramHtml(budgetGate.message), plainText: budgetGate.message };
+  }
+
   const context = await buildAssistantContext({
     state,
     actor,

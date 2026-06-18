@@ -1,7 +1,79 @@
 import crypto from "node:crypto";
 import { validation } from "./errors.js";
+import { Roles } from "./roles.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Per-user rolling-24h token budget. Default 2.2M tokens; override via env.
+// Counts every recorded token (input+output+cache) across all of the user's
+// actions in the trailing window. The OWNER is never hard-blocked (admin).
+export const DEFAULT_USER_DAILY_TOKEN_LIMIT = 2_200_000;
+const BUDGET_WARN_RATIO = 0.9;
+
+export function resolveUserDailyTokenLimit(env = process.env) {
+  const raw = Number(env?.TOKEN_USER_DAILY_LIMIT);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DEFAULT_USER_DAILY_TOKEN_LIMIT;
+}
+
+/** Sum of a user's total tokens in the trailing window (default 24h). */
+export function getUserTokenUsage(state, userId, { windowMs = DAY_MS, now = new Date() } = {}) {
+  ensureTokenUsageState(state, process.env, now);
+  if (!userId) {
+    return 0;
+  }
+  const cutoff = now.getTime() - windowMs;
+  let total = 0;
+  for (const event of state.tokenUsageEvents) {
+    if (event.userId !== userId) {
+      continue;
+    }
+    if (new Date(event.occurredAt).getTime() >= cutoff) {
+      total += Number(event.totalTokens || 0);
+    }
+  }
+  return total;
+}
+
+export function checkUserTokenBudget(state, userId, { now = new Date(), env = process.env } = {}) {
+  const limit = resolveUserDailyTokenLimit(env);
+  const used = getUserTokenUsage(state, userId, { windowMs: DAY_MS, now });
+  const warnAt = Math.floor(limit * BUDGET_WARN_RATIO);
+  return {
+    limit,
+    used,
+    remaining: Math.max(0, limit - used),
+    windowMs: DAY_MS,
+    exceeded: used >= limit,
+    warn: used >= warnAt && used < limit,
+  };
+}
+
+/**
+ * Gate a token-spending action for an actor. The OWNER is exempt from the hard
+ * block (still reported). Returns { allowed, budget, message? }.
+ */
+export function enforceUserTokenBudget(state, actor, { now = new Date(), env = process.env } = {}) {
+  if (!actor?.id) {
+    return { allowed: true };
+  }
+  const budget = checkUserTokenBudget(state, actor.id, { now, env });
+  if (actor.role === Roles.OWNER) {
+    return { allowed: true, budget };
+  }
+  if (budget.exceeded) {
+    return { allowed: false, budget, message: formatTokenBudgetExceeded(budget) };
+  }
+  return { allowed: true, budget };
+}
+
+export function formatTokenBudgetExceeded(budget) {
+  return [
+    "⏳ Достигнут суточный лимит токенов AI.",
+    `Лимит: ${formatNumber(budget.limit)} за 24 часа, использовано: ${formatNumber(budget.used)}.`,
+    "Лимит освобождается постепенно по мере «устаревания» запросов за последние сутки — попробуйте позже.",
+    "Если лимит нужно поднять, обратитесь к Николаю.",
+  ].join("\n");
+}
 
 export function ensureTokenUsageState(state, env = process.env, now = new Date()) {
   if (!Array.isArray(state.tokenUsageEvents)) {
