@@ -408,6 +408,36 @@ function uniqueAgents(agents) {
   });
 }
 
+// A device is "reachable" only while its OpenClaw app is running and sending
+// heartbeats (every ~60s). The stored status field stays "online" even after the
+// app is closed, so reachability is decided by lastSeenAt freshness instead.
+export const DEVICE_ONLINE_MAX_STALE_MS = 3 * 60 * 1000;
+
+export function isDeviceOnline(agent, now = new Date(), maxStaleMs = DEVICE_ONLINE_MAX_STALE_MS) {
+  const last = new Date(agent?.lastSeenAt || 0).getTime();
+  if (!Number.isFinite(last) || last === 0) {
+    return false;
+  }
+  return now.getTime() - last <= maxStaleMs;
+}
+
+export function describeDeviceLastSeen(agent, now = new Date()) {
+  const last = new Date(agent?.lastSeenAt || 0).getTime();
+  if (!Number.isFinite(last) || last === 0) {
+    return "сигналов ещё не было";
+  }
+  const sec = Math.max(0, Math.round((now.getTime() - last) / 1000));
+  if (sec < 60) {
+    return `${sec} сек назад`;
+  }
+  const min = Math.round(sec / 60);
+  if (min < 60) {
+    return `${min} мин назад`;
+  }
+  const hours = Math.round(min / 60);
+  return `${hours} ч назад`;
+}
+
 function sortCommandTargetAgents(agents, commandType) {
   return [...agents].sort((a, b) => compareCommandTargetAgents(a, b, commandType));
 }

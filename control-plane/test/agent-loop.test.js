@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { runAgentTask, resolveAgentTaskDevice, DEVICE_TOOL_SCHEMAS } from "../src/assistant/agent-loop.js";
+import { runAgentTask, resolveAgentTaskDevice, makeDeviceCommandRunner, DEVICE_TOOL_SCHEMAS } from "../src/assistant/agent-loop.js";
 import { createInitialState } from "../src/infra/seed.js";
 import { JsonStore } from "../src/infra/json-store.js";
 
@@ -42,6 +42,22 @@ test("DEVICE_TOOL_SCHEMAS expose valid tool definitions", () => {
     assert.equal(t.input_schema.type, "object");
   }
   assert.ok(DEVICE_TOOL_SCHEMAS.some((t) => t.name === "run_script"));
+});
+
+test("device command runner fast-fails when the device app is offline", async () => {
+  const state = createInitialState();
+  const { store, cleanup } = tempStore(state);
+  try {
+    const device = { ...deviceFor("u-nikolay"), lastSeenAt: new Date(Date.now() - 10 * 60 * 1000).toISOString() };
+    const run = makeDeviceCommandRunner({ store, actor: { id: "u-nikolay" }, device });
+    const outcome = await run({ type: "open_app", args: { app: "Chrome" } });
+    assert.equal(outcome.status, "failed");
+    assert.match(outcome.error, /не запущено|OpenClaw/u);
+    const s = await store.load();
+    assert.equal((s.deviceCommands || []).length, 0); // nothing queued
+  } finally {
+    await cleanup();
+  }
 });
 
 test("runAgentTask executes a tool then finishes", async () => {

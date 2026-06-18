@@ -5,11 +5,23 @@ import {
   claimDeviceCommands,
   completeDeviceCommand,
   createDeviceCommand,
+  describeDeviceLastSeen,
+  isDeviceOnline,
   isValidDeviceAgentToken,
   listVisibleDeviceCommands,
   listVisibleDeviceAgents,
   upsertDeviceAgentHeartbeat,
 } from "../src/domain/device-agents.js";
+
+test("isDeviceOnline tracks heartbeat freshness, not the sticky status field", () => {
+  const now = new Date("2026-06-18T12:00:00Z");
+  const fresh = { lastSeenAt: "2026-06-18T11:59:00Z", status: "online" }; // 1 min ago
+  const stale = { lastSeenAt: "2026-06-18T11:50:00Z", status: "online" }; // 10 min ago, app closed
+  assert.equal(isDeviceOnline(fresh, now), true);
+  assert.equal(isDeviceOnline(stale, now), false);
+  assert.equal(isDeviceOnline({ lastSeenAt: null }, now), false);
+  assert.match(describeDeviceLastSeen(stale, now), /мин назад/u);
+});
 import { createInviteCode } from "../src/domain/invite-codes.js";
 import { getUserById } from "../src/domain/policy.js";
 import { createInitialState } from "../src/infra/seed.js";

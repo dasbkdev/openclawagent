@@ -2,6 +2,8 @@ import { extractToolUseBlocks } from "./claude-client.js";
 import {
   createDeviceCommand,
   DEVICE_ACTION_TYPES,
+  describeDeviceLastSeen,
+  isDeviceOnline,
   isSensitiveDeviceAction,
   listVisibleDeviceAgents,
 } from "../domain/device-agents.js";
@@ -169,6 +171,7 @@ export async function runAgentTask({
   let totalUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   let finalSummary = null;
   let finalSuccess = false;
+  let offlineHit = null;
 
   for (let step = 0; step < maxSteps; step += 1) {
     let payload;
@@ -231,6 +234,9 @@ export async function runAgentTask({
         outcome = { status: "failed", error: error instanceof Error ? error.message : String(error) };
       }
 
+      if (outcome.status === "failed" && /OpenClaw.*не запущено/u.test(outcome.error || "")) {
+        offlineHit = outcome.error;
+      }
       steps.push({
         type,
         args: redactArgs(args),
@@ -254,6 +260,10 @@ export async function runAgentTask({
     }
   }
 
+  if (offlineHit && !finalSuccess) {
+    // The device app wasn't running — surface the actionable message verbatim.
+    finalSummary = `📴 ${offlineHit}`;
+  }
   if (finalSummary === null) {
     finalSummary = "Достигнут лимит шагов. Задача может быть выполнена не полностью.";
   }
@@ -318,6 +328,19 @@ export async function runAgentTask({
  */
 export function makeDeviceCommandRunner({ store, actor, device, timeoutMs = DEFAULT_COMMAND_WAIT_MS }) {
   return async function enqueueAndWait({ type, args }) {
+    // Fast-fail when the device's OpenClaw app isn't running (no recent
+    // heartbeat) — otherwise the command sits queued and times out after 90s.
+    // Re-read live state so a device that just went offline is caught too.
+    const liveState = await store.load();
+    const liveDevice =
+      (liveState.deviceAgents || []).find((d) => d.deviceId === device.deviceId) || device;
+    if (!isDeviceOnline(liveDevice)) {
+      return {
+        status: "failed",
+        error: `Приложение OpenClaw на устройстве «${device.displayName || device.deviceId}» не запущено (последний сигнал ${describeDeviceLastSeen(liveDevice)}). Запусти приложение на компьютере и повтори команду.`,
+      };
+    }
+
     let command;
     try {
       command = await store.update((state) =>
