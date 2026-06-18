@@ -1298,7 +1298,40 @@ export function syncDeviceCommandOpenLoop(state, command) {
   }
 }
 
-export function requireActor(state, request) {
+/**
+ * Optional defense-in-depth for the actor-header management endpoints. When
+ * CONTROL_PLANE_INTERNAL_TOKEN is configured, callers must also present a
+ * matching X-Internal-Token (constant-time compared). Unset by default, so this
+ * is fully backward compatible: enable it once the management client sends the
+ * token. The unsigned X-Actor-Telegram-Id remains usable on its own otherwise —
+ * acceptable because these endpoints are loopback-only (not in the nginx
+ * external allowlist) and the SSRF path to loopback is now closed.
+ */
+function assertInternalToken(request, env) {
+  const configured = String(env.CONTROL_PLANE_INTERNAL_TOKEN || "").trim();
+  if (!configured) {
+    return;
+  }
+  const provided = request.headers["x-internal-token"];
+  const value = Array.isArray(provided) ? provided[0] : provided;
+  if (typeof value !== "string" || !constantTimeEqual(value, configured)) {
+    throw unauthorized("X-Internal-Token is required");
+  }
+}
+
+function constantTimeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+export function requireActor(state, request, env = process.env) {
+  assertInternalToken(request, env);
   const telegramUserId = actorTelegramIdFromHeaders(request);
   if (!telegramUserId) {
     throw unauthorized("X-Actor-Telegram-Id header is required");
