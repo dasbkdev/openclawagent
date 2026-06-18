@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 
 import {
   isAllowedUrl,
+  isPublicWebUrl,
+  isBlockedHost,
   normalizeStep,
   validateBrowseRequest,
   checkBrowserAuth,
@@ -15,6 +17,41 @@ import {
   MAX_TIMEOUT_MS,
   MAX_STEPS,
 } from "../src/validate.js";
+
+test("isPublicWebUrl blocks loopback/private/reserved hosts (SSRF guard)", () => {
+  // public — allowed
+  assert.equal(isPublicWebUrl("https://example.com/path"), true);
+  assert.equal(isPublicWebUrl("http://93.184.216.34"), true);
+  // loopback / internal API
+  assert.equal(isPublicWebUrl("http://127.0.0.1:3099/api/v1/users"), false);
+  assert.equal(isPublicWebUrl("http://localhost:3099"), false);
+  assert.equal(isPublicWebUrl("http://[::1]/"), false);
+  assert.equal(isPublicWebUrl("http://::ffff:127.0.0.1/"), false);
+  // cloud metadata
+  assert.equal(isPublicWebUrl("http://169.254.169.254/latest/meta-data/"), false);
+  // private LAN
+  assert.equal(isPublicWebUrl("http://10.0.0.5"), false);
+  assert.equal(isPublicWebUrl("http://192.168.88.126"), false);
+  assert.equal(isPublicWebUrl("http://172.16.0.1"), false);
+  assert.equal(isPublicWebUrl("http://[fd00::1]/"), false);
+  // non-http still rejected
+  assert.equal(isPublicWebUrl("file:///etc/passwd"), false);
+});
+
+test("isBlockedHost covers ranges; domain names pass (DNS-checked later)", () => {
+  assert.equal(isBlockedHost("example.com"), false);
+  assert.equal(isBlockedHost("127.0.0.1"), true);
+  assert.equal(isBlockedHost("0.0.0.0"), true);
+  assert.equal(isBlockedHost("100.64.0.1"), true);
+  assert.equal(isBlockedHost("8.8.8.8"), false);
+});
+
+test("normalizeStep goto and validateBrowseRequest reject private targets", () => {
+  assert.throws(() => normalizeStep({ action: "goto", url: "http://127.0.0.1:3099" }, 0), /private|loopback|reserved|public/i);
+  assert.throws(() => validateBrowseRequest({ url: "http://169.254.169.254/" }), /private|loopback|reserved|public/i);
+  // a normal public goto still works
+  assert.equal(normalizeStep({ action: "goto", url: "https://example.com" }, 0).url, "https://example.com");
+});
 
 // ---------------------------------------------------------------------------
 // isAllowedUrl

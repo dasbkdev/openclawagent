@@ -1,11 +1,41 @@
 // Playwright (Chromium) controller for the browser service.
 // This module imports playwright and therefore is NOT loaded by unit tests.
 
+import { lookup } from "node:dns/promises";
 import { chromium } from "playwright";
 import {
+  isBlockedHost,
   MAX_SCREENSHOT_B64,
   truncateText,
 } from "./validate.js";
+
+/**
+ * SSRF guard at navigation time: resolve the host and reject if the host
+ * literal OR any resolved address is private/loopback/reserved. Defends
+ * against DNS rebinding (a domain that resolves to 127.0.0.1 / 169.254.x / LAN).
+ */
+async function assertPublicUrl(rawUrl) {
+  let host;
+  try {
+    host = new URL(String(rawUrl)).hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/u, "");
+  } catch {
+    throw new Error(`navigation blocked: invalid url "${rawUrl}"`);
+  }
+  if (isBlockedHost(host)) {
+    throw new Error(`navigation blocked: "${host}" is a private/reserved address`);
+  }
+  let records;
+  try {
+    records = await lookup(host, { all: true });
+  } catch {
+    throw new Error(`navigation blocked: cannot resolve "${host}"`);
+  }
+  for (const record of records) {
+    if (isBlockedHost(String(record.address))) {
+      throw new Error(`navigation blocked: "${host}" resolves to private address ${record.address}`);
+    }
+  }
+}
 
 const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
@@ -113,6 +143,7 @@ export async function runBrowserTask(task) {
     // Initial navigation if a top-level url is provided.
     if (url) {
       await guardAbort(ac.signal);
+      await assertPublicUrl(url);
       await page.goto(url, { waitUntil: "domcontentloaded" });
     }
 
@@ -217,6 +248,7 @@ async function runStep(page, step, stepTimeoutMs, signal) {
 
   switch (step.action) {
     case "goto": {
+      await assertPublicUrl(step.url);
       await page.goto(step.url, { waitUntil: "domcontentloaded", ...opts });
       return page.url();
     }

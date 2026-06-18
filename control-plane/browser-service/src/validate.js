@@ -46,6 +46,71 @@ export function isAllowedUrl(value) {
   return parsed.protocol === "http:" || parsed.protocol === "https:";
 }
 
+/**
+ * SSRF guard: an http(s) URL whose host is NOT a loopback / private / reserved
+ * address literal (or "localhost"). Domain names pass here and are checked
+ * again at navigation time after DNS resolution (anti-rebinding). This blocks
+ * the agent (or an injected page) from reaching the internal API
+ * (127.0.0.1:3099), the cloud metadata endpoint (169.254.169.254), or the LAN.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isPublicWebUrl(value) {
+  if (!isAllowedUrl(value)) return false;
+  let host;
+  try {
+    host = new URL(String(value).trim()).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return !isBlockedHost(host);
+}
+
+/** True if a hostname literal is loopback/private/link-local/reserved. */
+export function isBlockedHost(hostname) {
+  if (typeof hostname !== "string" || hostname === "") return true;
+  const host = hostname.replace(/^\[/, "").replace(/\]$/u, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  const v4 = parseIPv4(host) || ipv4FromMappedV6(host);
+  if (v4) return isPrivateIPv4(v4);
+  if (host.includes(":")) return isPrivateIPv6(host);
+  return false; // a domain name — resolved & re-checked at navigation time
+}
+
+function parseIPv4(host) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/u.exec(host);
+  if (!m) return null;
+  const parts = m.slice(1).map(Number);
+  if (parts.some((n) => n > 255)) return null;
+  return parts;
+}
+
+function ipv4FromMappedV6(host) {
+  // ::ffff:127.0.0.1  (IPv4-mapped IPv6)
+  const m = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/iu.exec(host);
+  return m ? parseIPv4(m[1]) : null;
+}
+
+function isPrivateIPv4([a, b]) {
+  if (a === 0 || a === 10 || a === 127) return true; // this-host, private, loopback
+  if (a === 169 && b === 254) return true; // link-local + cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true; // private
+  if (a === 192 && b === 168) return true; // private
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  if (a === 192 && b === 0) return true; // 192.0.0.0/24 reserved (incl. 192.0.0.x)
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
+  if (a >= 224) return true; // multicast + reserved
+  return false;
+}
+
+function isPrivateIPv6(host) {
+  const h = host.toLowerCase();
+  if (h === "::1" || h === "::" || h === "0:0:0:0:0:0:0:1") return true;
+  if (h.startsWith("fe80") || h.startsWith("fe9") || h.startsWith("fea") || h.startsWith("feb")) return true; // link-local fe80::/10
+  if (h.startsWith("fc") || h.startsWith("fd")) return true; // unique-local fc00::/7
+  return false;
+}
+
 function isPlainString(v) {
   return typeof v === "string" && v.length > 0;
 }
@@ -79,9 +144,9 @@ export function normalizeStep(raw, index = 0) {
 
   switch (action) {
     case "goto": {
-      if (!isAllowedUrl(raw.url)) {
+      if (!isPublicWebUrl(raw.url)) {
         throw new Error(
-          `step[${index}]: goto requires an http(s) url, got "${raw.url}"`,
+          `step[${index}]: goto requires a public http(s) url (private/loopback/reserved blocked), got "${raw.url}"`,
         );
       }
       step.url = String(raw.url).trim();
@@ -200,8 +265,8 @@ export function validateBrowseRequest(body) {
   // but if provided it must be an http(s) url.
   let url = null;
   if (body.url !== undefined && body.url !== null && body.url !== "") {
-    if (!isAllowedUrl(body.url)) {
-      throw new Error(`"url" must be an http(s) url, got "${body.url}"`);
+    if (!isPublicWebUrl(body.url)) {
+      throw new Error(`"url" must be a public http(s) url (private/loopback/reserved blocked), got "${body.url}"`);
     }
     url = String(body.url).trim();
   }
