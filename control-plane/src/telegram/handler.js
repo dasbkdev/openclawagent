@@ -32,6 +32,7 @@ import {
 import {
   parseRelayIntent,
   splitRecipientAndBody,
+  isReferenceBody,
   canBroadcast,
   listBroadcastRecipients,
   setPendingBroadcast,
@@ -1417,10 +1418,11 @@ async function maybeRelayMessage({ store, telegram, directTelegram, chatId, tele
     });
     return true;
   }
-  if (!body) {
+  if (!body || isReferenceBody(body)) {
+    const name = escapeHtml(res.user.displayName || "Имя");
     await telegram.sendMessage({
       chatId,
-      text: `Что передать ${escapeHtml(res.user.displayName || "сотруднику")}? Напишите: «сообщи ${escapeHtml(res.user.displayName || "Имя")} Текст».`,
+      text: `Какой именно текст отправить ${escapeHtml(res.user.displayName || "сотруднику")}? Напишите его прямо, например: «отправь ${name}: текст сообщения».`,
     });
     return true;
   }

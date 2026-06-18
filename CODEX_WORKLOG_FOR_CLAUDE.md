@@ -9358,6 +9358,31 @@ can only forward this". Added local text extraction + analysis:
   Suite 297 pass. Deployed.
 Not covered: legacy .doc (OLE binary), .pptx/.xlsx — could add later.
 
+## 2026-06-18 - Relay fix: messages to employees actually delivered + no hallucinated delivery
+
+Analyzed owner's last 20 assistant messages (read from assistantMemory in prod):
+"отправь Бегайым …" repeatedly NOT delivered — fell through to the read-only
+assistant, which hallucinated "доставку выполняет сервер через OpenClaw, я сам не
+отправляю" + drafted text but nothing was sent; owner repeated 3x. Root causes:
+recipient buried mid-sentence ("отправь свои вопросы по проекту Бегайым …"), verb
+not at message start ("Молодец и теперь отправь …"), and "это/свои вопросы" empty
+body. Fixes (P0, confirmed by owner):
+- user-messaging.js: parseRelayIntent strips conversational lead-ins before the verb
+  (stripLeadIns); splitRecipientAndBody scans EVERY position for an employee name
+  (not just leading) + handles "Имя: текст" colon form; normalizeName strips
+  surrounding punctuation; isReferenceBody() flags pointer-only bodies (это/свои…).
+  (Reused the \b-is-ASCII lesson: used a Unicode boundary in REFERENCE_BODY.)
+- handler.js maybeRelayMessage: empty OR reference body -> ask for the literal text
+  ("отправь Имя: текст") instead of sending garbage. Real send + fact-based
+  "Отправил …" confirmation were already correct.
+- company-assistant.js system prompt: hard ban on claiming/ describing message
+  delivery (no "сервер доставит"/"я не отправляю"); tell the user the "отправь Имя:
+  текст" format instead.
+- Tests +4 (lead-ins, mid-sentence recipient, colon form, isReferenceBody). 301 pass.
+Deferred (P1): true "send the exact thing you just generated" needs the assistant to
+emit a clean sendable draft — for now it honestly asks for the text. Plus a journal
+check for the silent no-reply window.
+
 ### Blocked (needs the Mac online)
 - macOS auto-update wiring (releases.json checker or Sparkle appcast) + Launch-at-Login
   autostart: requires a Swift change + rebuild on Maksat's Mac, which is currently

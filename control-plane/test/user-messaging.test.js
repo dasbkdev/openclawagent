@@ -4,6 +4,7 @@ import {
   parseRelayIntent,
   resolveMessageRecipient,
   splitRecipientAndBody,
+  isReferenceBody,
   canBroadcast,
   listBroadcastRecipients,
   setPendingBroadcast,
@@ -11,6 +12,41 @@ import {
   isAffirmative,
   isNegative,
 } from "../src/domain/user-messaging.js";
+
+test("parseRelayIntent strips conversational lead-ins before the verb", () => {
+  // "Молодец и теперь отправь …" — verb not at the very start
+  const i1 = parseRelayIntent("Молодец и теперь отправь Бегайым привет");
+  assert.equal(i1?.kind, "relay");
+  assert.match(i1.remainder, /^Бегайым/u);
+  const i2 = parseRelayIntent("ок, напиши Айзирек про отчёт");
+  assert.equal(i2?.kind, "relay");
+});
+
+test("splitRecipientAndBody finds the recipient mid-sentence", () => {
+  const state = sampleState();
+  const intent = parseRelayIntent("отправь свои вопросы по проекту Бегайым и попроси чтобы ответила");
+  const { res } = splitRecipientAndBody(state, intent.remainder);
+  assert.equal(res.status, "ok");
+  assert.equal(res.user.id, "u-begaiym");
+});
+
+test("splitRecipientAndBody handles the 'Имя: текст' form (with punctuation)", () => {
+  const state = sampleState();
+  const a = splitRecipientAndBody(state, "Бегайым: завтра собрание в 13:00");
+  assert.equal(a.res.status, "ok");
+  assert.equal(a.body, "завтра собрание в 13:00");
+  const b = splitRecipientAndBody(state, "Бегайым, привет"); // trailing punctuation on name
+  assert.equal(b.res.status, "ok");
+});
+
+test("isReferenceBody flags pointer-only bodies, keeps literal text", () => {
+  assert.equal(isReferenceBody(""), true);
+  assert.equal(isReferenceBody("это сообщение"), true);
+  assert.equal(isReferenceBody("свои вопросы по проекту и попроси ответить"), true);
+  assert.equal(isReferenceBody("все задачи завершены"), false);
+  assert.equal(isReferenceBody("завтра собрание в 13:00"), false);
+  assert.equal(isReferenceBody("Это важно: приходи к 10"), false); // colon = literal
+});
 
 function sampleState() {
   return {

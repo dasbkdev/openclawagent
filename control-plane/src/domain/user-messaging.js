@@ -20,6 +20,14 @@ const LEADING_CONNECTOR = /^\s*(?:что|чтобы|о\s+том,?\s+что|пр�
 // Filler words that may sit between the verb and the recipient name, e.g.
 // "отправь сообщение агенту Бегайым …" / "напиши сотруднику Айзирек …".
 const LEADING_FILLER = /^(?:сообщени[еяю]|сообщенье|смс|уведомлени[еяю]|месседж|весточк[ауи]|агенту|сотруднику|коллеге|товарищу|для|это|этот|эту|эти|вот|файл|документ|картинку|фото|изображение|видео|его|её|ее)(?:[\s,:—-]+|$)/iu;
+// Conversational lead-ins that may sit BEFORE the verb, e.g. "Молодец, и
+// теперь отправь …", "ок, напиши …". Stripped so the relay verb need not be the
+// very first word.
+const LEADING_LEADIN = /^(?:молодец|отлично|супер|класс|хорошо|хорош|ок|окей|окай|так|итак|слушай|давай(?:те)?|пожалуйста|плиз|спасибо|ну|а|и|потом|теперь|ещё|еще|также|тогда)(?:[\s,!.:—-]+)/iu;
+// Body that merely points at earlier content ("это", "эти вопросы", "свои
+// вопросы по проекту …") rather than carrying a real message to send.
+// NB: JS \b is ASCII-only and fails after Cyrillic — use a Unicode boundary.
+const REFERENCE_BODY = /^(?:это|этот|эту|эти|тот|та|то|свои|свое|свой|мои|мой)(?=$|[^\p{L}\p{N}])/iu;
 
 function stripLeadingFiller(text) {
   let value = String(text || "").trim();
@@ -31,6 +39,29 @@ function stripLeadingFiller(text) {
   return value;
 }
 
+function stripLeadIns(text) {
+  let value = String(text || "").trim();
+  let previous;
+  do {
+    previous = value;
+    value = value.replace(LEADING_LEADIN, "").trim();
+  } while (value !== previous && value.length > 0);
+  return value;
+}
+
+/** True when the body just refers to prior content and has no literal text. */
+export function isReferenceBody(body) {
+  const b = String(body || "").trim();
+  if (!b) {
+    return true;
+  }
+  // A colon / quotes signal a literal message ("Это важно: приходи") — keep it.
+  if (/[:«"]/u.test(b)) {
+    return false;
+  }
+  return REFERENCE_BODY.test(b);
+}
+
 const AFFIRMATIVE = /^\s*(да|ага|давай|давайте|подтверждаю|подтвердить|ок|окей|окай|yes|y|отправляй|отправляйте|отправь|отправить|шли|шлите)\s*[.!]*\s*$/iu;
 const NEGATIVE = /^\s*(нет|не\s+надо|отмена|отменить|отмени|стоп|cancel|no|n)\s*[.!]*\s*$/iu;
 
@@ -39,6 +70,7 @@ export function normalizeName(value) {
     .toLowerCase()
     .replace(/ё/gu, "е")
     .replace(/[\s_]+/gu, "")
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "") // strip surrounding punctuation (Имя: , .)
     .trim();
 }
 
@@ -51,10 +83,12 @@ export function normalizeName(value) {
  * needs the directory to know where the (possibly multi-word) name ends.
  */
 export function parseRelayIntent(text) {
-  const raw = String(text || "").trim();
-  if (!raw || raw.startsWith("/")) {
+  const original = String(text || "").trim();
+  if (!original || original.startsWith("/")) {
     return null;
   }
+  // Allow a short conversational lead-in before the verb ("Молодец и теперь отправь …").
+  const raw = stripLeadIns(original);
   const m = RELAY_VERB.exec(raw);
   if (!m) {
     return null;
@@ -123,7 +157,17 @@ export function resolveMessageRecipient(state, name) {
  * like "Бегайым" wins), preferring a linked match.
  */
 export function splitRecipientAndBody(state, remainder) {
-  const words = String(remainder || "").trim().split(/\s+/u).filter(Boolean);
+  const trimmed = String(remainder || "").trim();
+  // Explicit "Имя: текст" form (the format we suggest to the user).
+  const colon = trimmed.match(/^(.{1,40}?)\s*[:：]\s*([\s\S]+)$/u);
+  if (colon) {
+    const res = resolveMessageRecipient(state, colon[1]);
+    if (res.status === "ok" || res.status === "not_linked") {
+      return { res, body: colon[2].trim() };
+    }
+  }
+
+  const words = trimmed.split(/\s+/u).filter(Boolean);
   if (words.length === 0) {
     return { res: { status: "empty" }, body: "" };
   }
@@ -138,6 +182,25 @@ export function splitRecipientAndBody(state, remainder) {
     }
     if (res.status === "ambiguous" && !fallback) {
       fallback = { res, body };
+    }
+  }
+  // Recipient not at the start — scan every position for an employee name
+  // ("отправь свои вопросы по проекту Бегайым и попроси …").
+  for (let i = 1; i < words.length; i += 1) {
+    for (let n = 1; n <= Math.min(3, words.length - i); n += 1) {
+      const name = words.slice(i, i + n).join(" ");
+      const res = resolveMessageRecipient(state, name);
+      if (res.status === "ok" || res.status === "not_linked") {
+        const body = [...words.slice(0, i), ...words.slice(i + n)]
+          .join(" ")
+          .replace(LEADING_CONNECTOR, "")
+          .trim();
+        return { res, body };
+      }
+      if (res.status === "ambiguous" && !fallback) {
+        const body = [...words.slice(0, i), ...words.slice(i + n)].join(" ").trim();
+        fallback = { res, body };
+      }
     }
   }
   if (fallback) {
