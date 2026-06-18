@@ -46,7 +46,7 @@ check_health() {
     api=$(systemctl is-active company-control-plane-api.service 2>/dev/null || true)
     bot=$(systemctl is-active company-control-plane-telegram-bot.service 2>/dev/null || true)
     if [ "$api" = "active" ] && [ "$bot" = "active" ]; then
-      if curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null | grep -q '"ok":true'; then
+      if curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null | grep -qE '"ok"[[:space:]]*:[[:space:]]*true'; then
         return 0
       fi
     fi
