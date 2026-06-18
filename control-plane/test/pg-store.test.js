@@ -26,6 +26,12 @@ function createFakePool() {
       const id = params[0];
       return rows.has(id) ? { rows: [{ data: rows.get(id) }] } : { rows: [] };
     }
+    if (text.startsWith("SELECT cmd FROM control_plane_state")) {
+      const [id, cmdId] = params;
+      const data = rows.get(id);
+      const cmd = (data?.deviceCommands || []).find((c) => c.id === cmdId);
+      return cmd ? { rows: [{ cmd }] } : { rows: [] };
+    }
     if (text.startsWith("INSERT INTO control_plane_state")) {
       const [id, data] = params;
       // ON CONFLICT DO NOTHING vs DO UPDATE: the load() seed uses DO NOTHING.
@@ -112,6 +118,23 @@ test("update seeds when the row is missing", async () => {
   });
 
   assert.equal(pool.rows.get(1).count, 11);
+});
+
+test("readDeviceCommand narrowly returns one command by id (no full-state load)", async () => {
+  const pool = createFakePool();
+  const store = new PgStore({ pool, seedFactory: () => ({ deviceCommands: [] }) });
+  await store.ensureSchema();
+  await store.update((state) => {
+    state.deviceCommands = [
+      { id: "c1", status: "pending" },
+      { id: "c2", status: "succeeded" },
+    ];
+  });
+
+  assert.equal((await store.readDeviceCommand("c2")).status, "succeeded");
+  assert.equal(await store.readDeviceCommand("missing"), null);
+  // Narrow path issues the jsonb_array_elements query, not a full SELECT data.
+  assert.ok(pool.log.some((entry) => entry.startsWith("SELECT cmd FROM control_plane_state")));
 });
 
 test("filePath is preserved for derived on-disk artifacts", () => {

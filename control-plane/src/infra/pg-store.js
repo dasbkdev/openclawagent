@@ -48,6 +48,22 @@ export class PgStore {
     return result.rows[0].data;
   }
 
+  /**
+   * Narrow read of a single device command by id — avoids loading the whole
+   * state jsonb on every poll of the agent-loop command runner.
+   */
+  async readDeviceCommand(commandId) {
+    const result = await this.pool.query(
+      `SELECT cmd
+         FROM control_plane_state,
+              jsonb_array_elements(COALESCE(data->'deviceCommands', '[]'::jsonb)) AS cmd
+        WHERE id = $1 AND cmd->>'id' = $2
+        LIMIT 1`,
+      [this.stateId, String(commandId)],
+    );
+    return result.rows.length > 0 ? result.rows[0].cmd : null;
+  }
+
   async save(state) {
     await this.pool.query(
       `INSERT INTO control_plane_state (id, data, updated_at)

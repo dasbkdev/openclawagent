@@ -335,8 +335,11 @@ export function makeDeviceCommandRunner({ store, actor, device, timeoutMs = DEFA
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       await sleep(COMMAND_POLL_MS);
-      const state = await store.load();
-      const current = (state.deviceCommands || []).find((item) => item.id === command.id);
+      // Narrow read (avoids loading the whole state jsonb every second); fall
+      // back to a full load for stores that don't implement the narrow method.
+      const current = typeof store.readDeviceCommand === "function"
+        ? await store.readDeviceCommand(command.id)
+        : (await store.load()).deviceCommands?.find((item) => item.id === command.id);
       if (!current) {
         return { status: "failed", error: "command disappeared" };
       }

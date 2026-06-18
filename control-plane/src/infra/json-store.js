@@ -24,6 +24,11 @@ export class JsonStore {
     return JSON.parse(raw);
   }
 
+  async readDeviceCommand(commandId) {
+    const state = await this.load();
+    return (state.deviceCommands || []).find((cmd) => cmd.id === commandId) || null;
+  }
+
   async save(state) {
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     const tempPath = `${this.filePath}.${process.pid}.tmp`;
