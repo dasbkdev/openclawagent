@@ -33,11 +33,15 @@ import {
   parseRelayIntent,
   splitRecipientAndBody,
   isReferenceBody,
+  leadsWithConfirm,
   canBroadcast,
   listBroadcastRecipients,
   setPendingBroadcast,
   takePendingBroadcast,
   peekPendingBroadcast,
+  setPendingRelay,
+  peekPendingRelay,
+  takePendingRelay,
   isAffirmative,
   isNegative,
 } from "../domain/user-messaging.js";
@@ -70,7 +74,7 @@ import {
   formatNaturalDeviceCommandQueued,
   tryCreateNaturalDeviceCommand,
 } from "../domain/natural-device-actions.js";
-import { recordAssistantMemoryEvent } from "../domain/assistant-memory.js";
+import { readLastAssistantAnswer, recordAssistantMemoryEvent } from "../domain/assistant-memory.js";
 import { listAccessibleUserIds, publicProject, publicUser } from "../domain/policy.js";
 import { buildIntegrationsHealth } from "../domain/integration-health.js";
 import { buildKickidlerActivitySummary } from "../domain/reports.js";
@@ -490,6 +494,14 @@ export async function handleTelegramMessage({
             store, telegram, directTelegram, chatId, telegramUserId, text: command.raw, now,
           });
           if (handledBroadcastConfirm) {
+            return;
+          }
+
+          // "да"/"нет" answering a pending relay-draft confirmation ("отправь это Имя").
+          const handledRelayConfirm = await maybePendingRelayConfirm({
+            store, telegram, directTelegram, chatId, telegramUserId, text: command.raw, now,
+          });
+          if (handledRelayConfirm) {
             return;
           }
 
@@ -1418,16 +1430,45 @@ async function maybeRelayMessage({ store, telegram, directTelegram, chatId, tele
     });
     return true;
   }
+  const recipient = res.user;
+
   if (!body || isReferenceBody(body)) {
-    const name = escapeHtml(res.user.displayName || "Имя");
+    // "отправь это / свои вопросы Имя" — use the assistant's last answer as the
+    // draft so the owner doesn't have to copy-paste it.
+    const draft = String(readLastAssistantAnswer(state, actor.id) || "").trim();
+    if (!draft) {
+      const name = escapeHtml(recipient.displayName || "Имя");
+      await telegram.sendMessage({
+        chatId,
+        text: `Какой именно текст отправить ${escapeHtml(recipient.displayName || "сотруднику")}? Напишите его прямо, например: «отправь ${name}: текст сообщения».`,
+      });
+      return true;
+    }
+    // Explicit confirmation in the message itself ("Подтверждаю отправь Имя",
+    // "да отправь Имя") → deliver immediately; otherwise ask for one "да".
+    if (leadsWithConfirm(text)) {
+      return deliverRelay({ store, telegram, directTelegram, chatId, telegramUserId, recipient, body: draft, senderName, sourceText: text, now });
+    }
+    await store.update((s) =>
+      setPendingRelay(s, telegramUserId, { recipientId: recipient.id, recipientName: recipient.displayName, body: draft }, now),
+    );
     await telegram.sendMessage({
       chatId,
-      text: `Какой именно текст отправить ${escapeHtml(res.user.displayName || "сотруднику")}? Напишите его прямо, например: «отправь ${name}: текст сообщения».`,
+      text: [
+        title(`Отправить ${escapeHtml(recipient.displayName || "сотруднику")}?`),
+        "",
+        escapeHtml(draft.length > 1500 ? `${draft.slice(0, 1500)}…` : draft),
+        "",
+        "Ответь «да» — отправлю, «нет» — отменю. Или пришли свой текст: «отправь Имя: текст».",
+      ].join("\n"),
     });
     return true;
   }
 
-  const recipient = res.user;
+  return deliverRelay({ store, telegram, directTelegram, chatId, telegramUserId, recipient, body, senderName, sourceText: text, now });
+}
+
+async function deliverRelay({ store, telegram, directTelegram, chatId, telegramUserId, recipient, body, senderName, sourceText, now }) {
   try {
     await directTelegram.sendMessage({
       chatId: recipient.telegram.telegramUserId,
@@ -1448,15 +1489,45 @@ async function maybeRelayMessage({ store, telegram, directTelegram, chatId, tele
       channel: "telegram",
       role: "user",
       kind: "user_message_relay",
-      text,
+      text: sourceText,
       target: { userId: recipient.id },
       metadata: { recipientId: recipient.id },
       now,
     });
   });
 
-  await telegram.sendMessage({ chatId, text: `Отправил ${escapeHtml(recipient.displayName || "сотруднику")}: «${escapeHtml(body)}»` });
+  const preview = body.length > 400 ? `${body.slice(0, 400)}…` : body;
+  await telegram.sendMessage({ chatId, text: `Отправил ${escapeHtml(recipient.displayName || "сотруднику")}: «${escapeHtml(preview)}»` });
   return true;
+}
+
+async function maybePendingRelayConfirm({ store, telegram, directTelegram, chatId, telegramUserId, text, now }) {
+  const peeked = await store.load();
+  if (!peekPendingRelay(peeked, telegramUserId)) {
+    return false;
+  }
+  if (isNegative(text)) {
+    await store.update((s) => takePendingRelay(s, telegramUserId, now));
+    await telegram.sendMessage({ chatId, text: "Отменил отправку." });
+    return true;
+  }
+  if (!isAffirmative(text)) {
+    return false; // not a yes/no — let the normal flow handle; pending expires by TTL
+  }
+  const pending = await store.update((s) => takePendingRelay(s, telegramUserId, now));
+  if (!pending) {
+    await telegram.sendMessage({ chatId, text: "Черновик отправки истёк — повторите команду." });
+    return true;
+  }
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  const recipient = (state.users || []).find((u) => u.id === pending.recipientId);
+  if (!recipient?.telegram?.telegramUserId) {
+    await telegram.sendMessage({ chatId, text: "Получатель сейчас недоступен — повторите команду." });
+    return true;
+  }
+  const senderName = actor?.displayName || actor?.telegram?.firstName || "Коллега";
+  return deliverRelay({ store, telegram, directTelegram, chatId, telegramUserId, recipient, body: pending.body, senderName, sourceText: text, now });
 }
 
 async function maybePendingBroadcastConfirm({ store, telegram, directTelegram, chatId, telegramUserId, text, now }) {

@@ -23,7 +23,14 @@ const LEADING_FILLER = /^(?:сообщени[еяю]|сообщенье|смс|�
 // Conversational lead-ins that may sit BEFORE the verb, e.g. "Молодец, и
 // теперь отправь …", "ок, напиши …". Stripped so the relay verb need not be the
 // very first word.
-const LEADING_LEADIN = /^(?:молодец|отлично|супер|класс|хорошо|хорош|ок|окей|окай|так|итак|слушай|давай(?:те)?|пожалуйста|плиз|спасибо|ну|а|и|потом|теперь|ещё|еще|также|тогда)(?:[\s,!.:—-]+)/iu;
+const LEADING_LEADIN = /^(?:молодец|отлично|супер|класс|хорошо|хорош|ок|окей|окай|так|итак|слушай|давай(?:те)?|пожалуйста|плиз|спасибо|ну|а|и|потом|теперь|ещё|еще|также|тогда|подтвержда[а-яё]*|подтверди[а-яё]*)(?:[\s,!.:—-]+)/iu;
+// Message that LEADS with an explicit confirmation ("да отправь …",
+// "подтверждаю отправь …") — used to send a pending draft without re-asking.
+const LEAD_CONFIRM = /^\s*(?:да|ага|ок|окей|подтвержда[а-яё]*|подтверди[а-яё]*|отправляй(?:те)?|шли(?:те)?)(?=$|[^\p{L}\p{N}])/iu;
+
+export function leadsWithConfirm(text) {
+  return LEAD_CONFIRM.test(String(text || ""));
+}
 // Body that merely points at earlier content ("это", "эти вопросы", "свои
 // вопросы по проекту …") rather than carrying a real message to send.
 // NB: JS \b is ASCII-only and fails after Cyrillic — use a Unicode boundary.
@@ -245,6 +252,42 @@ export function peekPendingBroadcast(state, telegramUserId) {
  */
 export function takePendingBroadcast(state, telegramUserId, now = new Date(), ttlMs = 5 * 60 * 1000) {
   const map = ensureMessagingState(state);
+  const key = String(telegramUserId);
+  const pending = map[key];
+  delete map[key];
+  if (!pending) {
+    return null;
+  }
+  if (now.getTime() - new Date(pending.createdAt).getTime() > ttlMs) {
+    return null;
+  }
+  return pending;
+}
+
+// Pending relay draft: "отправь это/свои вопросы Имя" stages the last assistant
+// answer as the message; a "да" then delivers it (one tap, no copy-paste).
+function ensurePendingRelays(state) {
+  if (!state.pendingRelays || typeof state.pendingRelays !== "object") {
+    state.pendingRelays = {};
+  }
+  return state.pendingRelays;
+}
+
+export function setPendingRelay(state, telegramUserId, payload, now = new Date()) {
+  ensurePendingRelays(state)[String(telegramUserId)] = {
+    recipientId: payload.recipientId,
+    recipientName: payload.recipientName || null,
+    body: payload.body,
+    createdAt: now.toISOString(),
+  };
+}
+
+export function peekPendingRelay(state, telegramUserId) {
+  return ensurePendingRelays(state)[String(telegramUserId)] || null;
+}
+
+export function takePendingRelay(state, telegramUserId, now = new Date(), ttlMs = 5 * 60 * 1000) {
+  const map = ensurePendingRelays(state);
   const key = String(telegramUserId);
   const pending = map[key];
   delete map[key];

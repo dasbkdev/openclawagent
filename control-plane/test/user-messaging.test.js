@@ -5,6 +5,10 @@ import {
   resolveMessageRecipient,
   splitRecipientAndBody,
   isReferenceBody,
+  leadsWithConfirm,
+  setPendingRelay,
+  peekPendingRelay,
+  takePendingRelay,
   canBroadcast,
   listBroadcastRecipients,
   setPendingBroadcast,
@@ -12,6 +16,45 @@ import {
   isAffirmative,
   isNegative,
 } from "../src/domain/user-messaging.js";
+import { readLastAssistantAnswer } from "../src/domain/assistant-memory.js";
+
+test("leadsWithConfirm detects an explicit leading confirmation", () => {
+  assert.equal(leadsWithConfirm("Подтверждаю отправь бегайым"), true);
+  assert.equal(leadsWithConfirm("да отправь Бегайым"), true);
+  assert.equal(leadsWithConfirm("отправь это Бегайым"), false);
+});
+
+test("parseRelayIntent treats 'Подтверждаю отправь Имя' as a relay (lead-in stripped)", () => {
+  const intent = parseRelayIntent("Подтверждаю отправь бегайым");
+  assert.equal(intent?.kind, "relay");
+  assert.match(intent.remainder, /бегайым/iu);
+});
+
+test("pending relay draft is staged, consumed once, and expires", () => {
+  const state = {};
+  const now = new Date("2026-06-18T12:00:00Z");
+  setPendingRelay(state, "100", { recipientId: "u-begaiym", recipientName: "Бегайым", body: "вопросы по проекту" }, now);
+  assert.equal(peekPendingRelay(state, "100").recipientId, "u-begaiym");
+  const taken = takePendingRelay(state, "100", now);
+  assert.equal(taken.body, "вопросы по проекту");
+  assert.equal(peekPendingRelay(state, "100"), null); // consumed
+  // expiry
+  setPendingRelay(state, "100", { recipientId: "u-begaiym", body: "x" }, now);
+  assert.equal(takePendingRelay(state, "100", new Date(now.getTime() + 6 * 60 * 1000)), null);
+});
+
+test("readLastAssistantAnswer returns the most recent assistant text", () => {
+  const state = {
+    assistantMemory: [
+      { userId: "u-nikolay", role: "assistant", text: "старый ответ", createdAt: "2026-06-18T10:00:00Z" },
+      { userId: "u-nikolay", role: "user", text: "вопрос", createdAt: "2026-06-18T10:30:00Z" },
+      { userId: "u-nikolay", role: "assistant", text: "вопросы: 1, 2, 3", createdAt: "2026-06-18T10:55:00Z" },
+      { userId: "u-maksat", role: "assistant", text: "чужое", createdAt: "2026-06-18T11:00:00Z" },
+    ],
+  };
+  assert.equal(readLastAssistantAnswer(state, "u-nikolay"), "вопросы: 1, 2, 3");
+  assert.equal(readLastAssistantAnswer({ assistantMemory: [] }, "u-nikolay"), null);
+});
 
 test("parseRelayIntent strips conversational lead-ins before the verb", () => {
   // "Молодец и теперь отправь …" — verb not at the very start
