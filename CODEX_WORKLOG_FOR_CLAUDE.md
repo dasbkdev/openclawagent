@@ -9341,6 +9341,23 @@ Fixes (commits d7d896b, 1c7789c; deployed):
   mechanism over a breaking signing rewrite.
 - All deployed via the health-gated deploy; 291->293 tests pass.
 
+## 2026-06-18 - Word (.docx) + text file analysis in the bot
+
+User sent a .docx and the bot replied "I only analyze images/PDF/video/audio,
+can only forward this". Added local text extraction + analysis:
+- src/domain/docx-text.js (NEW, zero-dep): extractDocxText reads word/document.xml
+  straight from the .docx ZIP (central-directory parse + node:zlib inflateRaw),
+  stripDocumentXml -> plain text (paragraph/tab/break + XML entities). Claude's API
+  has no .docx document block, so we extract text and feed it to complete().
+- media-actions.js: classify .docx -> kind "docx", text/.txt/.md/.csv -> "text";
+  isExtractableText(media).
+- handler.js analyzeIncomingMedia: new branch downloads the file, extracts text
+  (docx via extractDocxText, text as utf8), sends to claudeClient.complete() for a
+  Russian summary (first ~14k chars), replies. Fallback text updated to list Word/text.
+- Tests +4 (built a real one-entry .docx in-test, verified extraction + classification).
+  Suite 297 pass. Deployed.
+Not covered: legacy .doc (OLE binary), .pptx/.xlsx — could add later.
+
 ### Blocked (needs the Mac online)
 - macOS auto-update wiring (releases.json checker or Sparkle appcast) + Launch-at-Login
   autostart: requires a Swift change + rebuild on Maksat's Mac, which is currently

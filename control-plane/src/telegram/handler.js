@@ -44,9 +44,11 @@ import {
   extractIncomingMedia,
   forwardMethodFor,
   isAnalyzableByVision,
+  isExtractableText,
   isTranscribable,
   TELEGRAM_DOWNLOAD_LIMIT_BYTES,
 } from "../domain/media-actions.js";
+import { extractDocxText } from "../domain/docx-text.js";
 import {
   createDeviceCommand,
   listVisibleDeviceAgents,
@@ -1527,6 +1529,8 @@ function mediaLabel(media) {
   switch (media?.kind) {
     case "image": return "изображение";
     case "pdf": return "PDF";
+    case "docx": return "документ Word";
+    case "text": return "текстовый файл";
     case "video": return "видео";
     case "audio": return "аудио";
     default: return "файл";
@@ -1685,11 +1689,45 @@ async function analyzeIncomingMedia({ telegram, directTelegram, claudeClient, vo
     return;
   }
 
+  if (isExtractableText(media)) {
+    if (!claudeClient?.complete) {
+      await telegram.sendMessage({ chatId, text: "Анализ документов пока недоступен (Claude не настроен)." });
+      return;
+    }
+    await telegram.sendMessage({ chatId, text: `📄 Читаю ${mediaLabel(media)}…` }).catch(() => {});
+    try {
+      const file = await directTelegram.getFile({ fileId: media.fileId });
+      const bytes = await directTelegram.downloadFile({ filePath: file.file_path });
+      let text = media.kind === "docx"
+        ? extractDocxText(Buffer.from(bytes))
+        : Buffer.from(bytes).toString("utf8");
+      text = String(text || "").trim();
+      if (!text) {
+        await telegram.sendMessage({ chatId, text: `Не удалось извлечь текст из ${mediaLabel(media)}. Могу переслать файл: «отправь это Имя».` });
+        return;
+      }
+      const limited = text.slice(0, 14000);
+      const r = await claudeClient.complete({
+        system: "Ты ассистент Starlab. Анализируй документ и отвечай кратко и по делу, на русском, без Markdown-разметки.",
+        user: `${caption?.trim() || "Сделай краткий анализ документа: о чём он, ключевые пункты, требования, числа, выводы."}\n\nТекст документа:\n${limited}`,
+        maxTokens: 1400,
+      });
+      const out = [title(`Документ${media.fileName ? `: ${escapeHtml(media.fileName)}` : ""}`), escapeHtml(r.text)];
+      if (text.length > limited.length) {
+        out.push("", escapeHtml("(документ длинный — анализ по первым ~14 000 символам)"));
+      }
+      await telegram.sendMessage({ chatId, text: out.join("\n") });
+    } catch (error) {
+      await telegram.sendMessage({ chatId, text: escapeHtml(`Не удалось обработать ${mediaLabel(media)}: ${error instanceof Error ? error.message : String(error)}`) });
+    }
+    return;
+  }
+
   await telegram.sendMessage({
     chatId,
     text: [
       `Получил ${mediaLabel(media)}${media.fileName ? ` (${escapeHtml(media.fileName)})` : ""}.`,
-      "Я анализирую изображения, PDF, видео и аудио. Файл такого типа могу переслать сотрудникам: «отправь это Имя» или «отправь всем».",
+      "Я анализирую изображения, PDF, документы Word (.docx), текстовые файлы, видео и аудио. Файл такого типа могу только переслать сотрудникам: «отправь это Имя» или «отправь всем».",
     ].join("\n"),
   });
 }

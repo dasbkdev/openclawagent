@@ -30,11 +30,19 @@ export function extractIncomingMedia(message) {
   if (message.document) {
     const doc = message.document;
     const mime = String(doc.mime_type || "").toLowerCase();
+    const name = String(doc.file_name || "").toLowerCase();
     let kind = "document";
     if (mime.startsWith("image/")) {
       kind = "image";
-    } else if (mime === "application/pdf" || String(doc.file_name || "").toLowerCase().endsWith(".pdf")) {
+    } else if (mime === "application/pdf" || name.endsWith(".pdf")) {
       kind = "pdf";
+    } else if (
+      mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      name.endsWith(".docx")
+    ) {
+      kind = "docx";
+    } else if (mime.startsWith("text/") || name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".csv")) {
+      kind = "text";
     }
     return {
       kind,
@@ -97,4 +105,10 @@ export function isAnalyzableByVision(media) {
 
 export function isTranscribable(media) {
   return media?.kind === "video" || media?.kind === "audio";
+}
+
+// Documents whose text we extract locally and analyze as plain text
+// (Word .docx, plain text/markdown/csv) — not via the vision API.
+export function isExtractableText(media) {
+  return media?.kind === "docx" || media?.kind === "text";
 }
