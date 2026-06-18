@@ -60,8 +60,10 @@ if command -v docker >/dev/null 2>&1 && docker inspect "$PG_CONTAINER" >/dev/nul
   if docker exec "$PG_CONTAINER" sh -c \
        'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists' \
        | gzip -c > "$PG_TMP"; then
-    if gzip -t "$PG_TMP" 2>/dev/null \
-       && gzip -dc "$PG_TMP" | grep -q "control_plane_state"; then
+    # grep -c reads the whole stream (grep -q would SIGPIPE gzip, which under
+    # `set -o pipefail` falsely fails the check); || true guards grep's exit 1.
+    pg_matches="$(gzip -dc "$PG_TMP" | grep -c "control_plane_state" || true)"
+    if gzip -t "$PG_TMP" 2>/dev/null && [ "${pg_matches:-0}" -gt 0 ]; then
       chmod 600 "$PG_TMP"
       mv "$PG_TMP" "$PG_OUT"
       echo "Postgres backup: $PG_OUT ($(du -h "$PG_OUT" | cut -f1))"
