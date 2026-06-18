@@ -50,7 +50,8 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=$BACKUP_SCRIPT
+# Run via bash so a missing execute bit never breaks the unit (203/EXEC).
+ExecStart=/bin/bash $BACKUP_SCRIPT
 EOF
 
 cat > "$TIMER_PATH" <<EOF
