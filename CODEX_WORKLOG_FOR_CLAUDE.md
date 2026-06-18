@@ -9322,8 +9322,30 @@ Fixes (commits d7d896b, 1c7789c; deployed):
   RESTORE TEST into a scratch DB: 0 errors, control_plane_state=1, memory_embeddings=77,
   users=5. Daily timer active (Fri 03:30 UTC next).
 
-### Remaining plumbing (not yet done)
-- Deploy health-gate + rollback automation.
+## 2026-06-18 - Hardening batch cont'd: health-gate, state narrow-read, auth guard (deployed)
+
+- Deploy health-gate + auto-rollback (deploy-from-git.sh): after restart, verify
+  both services active + API /health ok (retried); on failure reset code to the
+  previous commit, re-sync, restart, exit non-zero. Caught a self-inflicted grep
+  bug live (health JSON is pretty-printed `"ok": true` with a space; the rollback
+  path fired harmlessly since OLD==NEW, then I made the grep whitespace-tolerant).
+  Commits 993f430, ad17fb6.
+- State narrow read (ac15610): store.readDeviceCommand(id) — PgStore narrow
+  jsonb_array_elements query, JsonStore load+find; agent-loop hot-path poll uses it
+  (was loading the whole state jsonb every 1s for up to 90s) with a full-load fallback.
+- Auth (d701096): optional X-Internal-Token guard on requireActor, gated by
+  CONTROL_PLANE_INTERNAL_TOKEN, OFF by default (zero behaviour change). Diligence:
+  the actor-header management API is loopback-only (nginx external allowlist does NOT
+  include it; catch-all `location /` -> n8n; `/control-plane/` prefix isn't routed),
+  and SSRF to loopback is closed, so residual risk was low — chose the safe additive
+  mechanism over a breaking signing rewrite.
+- All deployed via the health-gated deploy; 291->293 tests pass.
+
+### Blocked (needs the Mac online)
+- macOS auto-update wiring (releases.json checker or Sparkle appcast) + Launch-at-Login
+  autostart: requires a Swift change + rebuild on Maksat's Mac, which is currently
+  unreachable (192.168.88.126 timed out). Resume when the Mac is back on a shared
+  network (SSH key ~/.ssh/maksat_mac; recipe in [[desktop-agent-build-topology]]).
 - State: replace agent-loop 1s full-state poll with a narrow read; keep slow I/O
   out of the advisory-locked mutator.
 - Internal auth signing (X-Actor-Telegram-Id) — lower urgency now SSRF chain closed;
