@@ -89,6 +89,47 @@ test("distill applies valid JSON: upserts facts, resolves and opens loops", asyn
   assert.equal(store.snapshot().tokenUsageEvents[0].action, "assistant.memory.distill");
 });
 
+test("distill attributes a fact to its subject, not the asker", async () => {
+  const store = createMemoryStore({
+    users: [
+      { id: "u-a", displayName: "Николай" },
+      { id: "u-b", displayName: "Бегайым" },
+    ],
+  });
+  const claudeClient = {
+    configured: true,
+    async complete() {
+      return {
+        text: JSON.stringify({
+          newFacts: [
+            { subjectUserId: "u-b", category: "commitment", text: "Бегайым обещала отчёт завтра" },
+            { subjectUserId: "u-x", category: "other", text: "факт с неизвестным id" },
+          ],
+          resolvedLoopIds: [],
+          newLoops: [],
+        }),
+        model: "m",
+        usage: null,
+        configured: true,
+      };
+    },
+  };
+  await distillAssistantMemory({
+    store,
+    claudeClient,
+    actor: { id: "u-a" },
+    question: "как там Бегайым?",
+    answer: "...",
+    now: new Date("2026-06-18T10:00:00Z"),
+  });
+
+  const factsB = listAssistantFacts(store.snapshot(), { userIds: ["u-b"] });
+  assert.ok(factsB.some((f) => /Бегайым обещала/u.test(f.text)), "subject fact under u-b");
+  const factsA = listAssistantFacts(store.snapshot(), { userIds: ["u-a"] });
+  assert.equal(factsA.some((f) => /Бегайым обещала/u.test(f.text)), false, "not under asker");
+  assert.ok(factsA.some((f) => /неизвестным id/u.test(f.text)), "invalid subject falls back to asker");
+});
+
 test("distill silently does nothing on garbage output", async () => {
   const store = createMemoryStore();
   const claudeClient = {

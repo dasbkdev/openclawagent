@@ -30,10 +30,13 @@ export async function distillAssistantMemory({
   try {
     const state = await store.load();
     const openLoops = listOpenAssistantLoops(state, { userIds: [actorUserId], limit: 20 });
+    const directory = (state.users || []).map((u) => ({ id: u.id, name: u.displayName || u.id }));
+    const validUserIds = new Set((state.users || []).map((u) => u.id));
+    const actorName = directory.find((u) => u.id === actorUserId)?.name || actorUserId;
     const model = env.CLAUDE_MEMORY_MODEL || DEFAULT_MEMORY_MODEL;
     const completion = await claudeClient.complete({
       system: buildDistillSystemPrompt(),
-      user: buildDistillUserPrompt({ question, answer, openLoops }),
+      user: buildDistillUserPrompt({ question, answer, openLoops, actorUserId, actorName, directory }),
       maxTokens: 700,
       model,
     });
@@ -50,8 +53,11 @@ export async function distillAssistantMemory({
       let newLoopCount = 0;
 
       for (const fact of parsed.newFacts) {
+        // Attribute the fact to its SUBJECT (the person it is about), not the
+        // asker. Fall back to the asker only if the subject is unknown/invalid.
+        const subjectId = validUserIds.has(fact.subjectUserId) ? fact.subjectUserId : actorUserId;
         const created = upsertAssistantFact(currentState, {
-          userId: actorUserId,
+          userId: subjectId,
           category: fact.category,
           text: fact.text,
           now,
@@ -154,6 +160,7 @@ export function parseDistillation(text) {
 
   const newFacts = (Array.isArray(payload.newFacts) ? payload.newFacts : [])
     .map((fact) => ({
+      subjectUserId: String(fact?.subjectUserId || "").trim() || null,
       category: FACT_CATEGORIES.has(fact?.category) ? fact.category : "other",
       text: String(fact?.text || "").trim(),
     }))
@@ -178,8 +185,9 @@ function buildDistillSystemPrompt() {
     "Ты — модуль долговременной памяти AI-ассистента компании Starlab.",
     "Из пары вопрос+ответ и списка текущих открытых дел извлеки структурированные данные.",
     "Верни СТРОГО валидный JSON без пояснений, без markdown, без текста до или после.",
-    "Формат: {\"newFacts\":[{\"category\":\"commitment|preference|habit|project|other\",\"text\":\"...\"}],\"resolvedLoopIds\":[\"...\"],\"newLoops\":[{\"kind\":\"command_follow_up|promise|question|task_progress|other\",\"text\":\"...\"}]}",
+    "Формат: {\"newFacts\":[{\"subjectUserId\":\"...\",\"category\":\"commitment|preference|habit|project|other\",\"text\":\"...\"}],\"resolvedLoopIds\":[\"...\"],\"newLoops\":[{\"kind\":\"command_follow_up|promise|question|task_progress|other\",\"text\":\"...\"}]}",
     "newFacts — устойчивые факты о сотруднике (обязательства, предпочтения, привычки, проекты). Не короткоживущая болтовня.",
+    "subjectUserId — id сотрудника, О КОТОРОМ факт (выбери из списка сотрудников). Если факт о самом спрашивающем — поставь его id. КРИТИЧНО: не приписывай спрашивающему факты о других людях — если он спрашивает про Бегайым, факт о Бегайым ставь с ЕЁ id, а не его. Если непонятно, о ком факт — пропусти его.",
     "resolvedLoopIds — id тех открытых дел из списка, которые этот диалог закрывает.",
     "newLoops — новые незакрытые дела (обещания, вопросы без ответа, начатые задачи).",
     "Пустые массивы — это норма. Ничего не выдумывай: только то, что явно есть в диалоге.",
@@ -187,8 +195,12 @@ function buildDistillSystemPrompt() {
   ].join(" ");
 }
 
-function buildDistillUserPrompt({ question, answer, openLoops }) {
+function buildDistillUserPrompt({ question, answer, openLoops, actorUserId, actorName, directory = [] }) {
   return [
+    `Спрашивающий: ${actorName} (id: ${actorUserId}).`,
+    "Сотрудники (id — имя). subjectUserId выбирай ТОЛЬКО из этого списка:",
+    directory.length ? directory.map((u) => `${u.id} — ${u.name}`).join("\n") : "(список пуст)",
+    "",
     "Вопрос пользователя:",
     String(question || "").trim() || "(пусто)",
     "",
