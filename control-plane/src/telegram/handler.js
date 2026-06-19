@@ -54,6 +54,7 @@ import {
   TELEGRAM_DOWNLOAD_LIMIT_BYTES,
 } from "../domain/media-actions.js";
 import { extractDocxText } from "../domain/docx-text.js";
+import { classifyIntent, intentClassifierEnabled } from "../domain/intent-classifier.js";
 import {
   createDeviceCommand,
   listVisibleDeviceAgents,
@@ -565,6 +566,32 @@ export async function handleTelegramMessage({
           });
           if (handledDeviceAction) {
             return;
+          }
+
+          // Safety net (off by default, INTENT_CLASSIFIER_ENABLED): nothing matched
+          // — let the classifier normalize the phrase into a canonical command and
+          // re-run the deterministic handlers before falling back to the assistant.
+          if (intentClassifierEnabled()) {
+            const cls = await classifyIntent({
+              claudeClient,
+              text: command.raw,
+              users: (await store.load()).users,
+            });
+            if (cls?.canonical) {
+              const reText = cls.canonical;
+              const reHandlers = [
+                () => maybeRelayMessage({ store, telegram, directTelegram, chatId, telegramUserId, text: reText, now }),
+                () => maybeDeletePlan({ store, telegram, chatId, telegramUserId, text: reText, now }),
+                () => maybeAddToPlan({ store, telegram, chatId, telegramUserId, text: reText, now }),
+                () => maybeCreateNaturalPlan({ store, telegram, chatId, telegramUserId, text: reText, now }),
+                () => maybeMarkNaturalDone({ store, telegram, chatId, telegramUserId, text: reText, now }),
+              ];
+              for (const run of reHandlers) {
+                if (await run()) {
+                  return;
+                }
+              }
+            }
           }
 
           if (isWebResearchQuery(command.raw)) {
