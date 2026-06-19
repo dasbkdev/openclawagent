@@ -9383,6 +9383,34 @@ Deferred (P1): true "send the exact thing you just generated" needs the assistan
 emit a clean sendable draft — for now it honestly asks for the text. Plus a journal
 check for the silent no-reply window.
 
+## 2026-06-19 - Product weak-spots batch (8 items, pushed; deploy pending key on new laptop)
+
+Owner asked to fix the "what works poorly" list except mac-autoupdate, single-row
+DB, and the n8n/control-plane Telegram duplication. Done + pushed to server:
+- Memory v3 (cbc57cb): distiller attributes facts to their SUBJECT (directory +
+  subjectUserId), not the asker; invalid subject falls back to asker.
+- Assistant prompt (1edec2c): browsers/work apps are productive (don't echo
+  Metricon's "uncategorized" as 0% productivity); be concise (no heartbeat/id/UTC
+  noise).
+- Word (35239e5): docx tables -> tab-separated rows; analysis up to ~40k chars.
+- Plan reminder (69f6436): afternoon nudge when no daily plan exists yet.
+- Windows agent (c779699): closing the window minimizes + keeps the agent running
+  (heartbeat/polling) instead of quitting; autostart launches --hidden; v2026.6.8.
+  NEEDS a Windows rebuild + publish to roll out (clients auto-update via releases.json).
+- Intent classifier (38979d0, OFF by default INTENT_CLASSIFIER_ENABLED): LLM safety
+  net that normalizes a missed phrase into a canonical command and re-runs the
+  deterministic handlers.
+- Anti-hallucination: covered by the earlier delivery ban + the accuracy/concise
+  prompt lines.
+Tests 309 -> 314. All pushed.
+
+### IMPORTANT — deploy is blocked on the new laptop
+The owner migrated to a new Windows laptop. GitHub push works (id_ed25519 + ssh-agent,
+passphrase "das"), but id_ed25519 is NOT authorized on the prod server, so nothing
+since 3b3c89e is deployed. To deploy: add id_ed25519.pub to the server's
+authorized_keys (e.g. `ssh-copy-id -i ~/.ssh/id_ed25519.pub root@195.238.122.228`),
+then run deploy-from-git.sh. ssh-agent for the session: `source ~/.ssh-agent-env`.
+
 ### Blocked (needs the Mac online)
 - macOS auto-update wiring (releases.json checker or Sparkle appcast) + Launch-at-Login
   autostart: requires a Swift change + rebuild on Maksat's Mac, which is currently
