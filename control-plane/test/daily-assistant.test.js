@@ -126,6 +126,26 @@ test("daily assistant manager report follows hierarchy", async () => {
   assert.equal(state.managerReports.length, 1);
 });
 
+test("plan reminder fires in the afternoon only when no plan exists yet", () => {
+  const now = new Date("2026-06-18T10:30:00Z"); // 16:30 Asia/Bishkek -> plan_reminder window
+  const state = createInitialState({ BOOTSTRAP_OWNER_TELEGRAM_ID: "999" });
+  const pm = getUserById(state, "u-pm-1");
+  pm.telegram = { telegramUserId: "777", linkedAt: now.toISOString() };
+
+  const first = collectDueDailyAssistantPrompts(state, { now }).filter((m) => m.chatId === "777");
+  assert.ok(first.some((m) => /плана на сегодня ещё нет/u.test(m.text)));
+  // once per day — second poll sends nothing new to this user
+  assert.equal(collectDueDailyAssistantPrompts(state, { now }).filter((m) => m.chatId === "777").length, 0);
+
+  // a user who already has a plan gets no reminder
+  const state2 = createInitialState({ BOOTSTRAP_OWNER_TELEGRAM_ID: "999" });
+  const pm2 = getUserById(state2, "u-pm-1");
+  pm2.telegram = { telegramUserId: "777", linkedAt: now.toISOString() };
+  createOrUpdateDailyPlan(state2, { actor: pm2, text: "задача1; задача2", now });
+  const withPlan = collectDueDailyAssistantPrompts(state2, { now }).filter((m) => m.chatId === "777");
+  assert.equal(withPlan.some((m) => /плана на сегодня ещё нет/u.test(m.text)), false);
+});
+
 test("daily assistant prompts are sent once per local day window", () => {
   const state = createInitialState({ BOOTSTRAP_OWNER_TELEGRAM_ID: "999" });
   ensureDailyAssistantState(state);

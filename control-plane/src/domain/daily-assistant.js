@@ -452,6 +452,27 @@ export function collectDueDailyAssistantPrompts(state, { now = new Date(), timeZ
     }
   }
 
+  // Conditional reminder: still no daily plan by the afternoon/evening → nudge to
+  // submit one (so standups/plans don't get skipped). Sent once per day.
+  if (hour >= AFTERNOON_START_HOUR && hour < EVENING_END_HOUR) {
+    for (const user of registeredUsers) {
+      const type = "plan_reminder";
+      if (hasOutboundCheckin(state, user.id, date, type)) {
+        continue;
+      }
+      if (findTodayPlanForUser(state, user.id, now)) {
+        continue; // plan already exists — nothing to remind
+      }
+      const text = [
+        title(`${user.displayName}: плана на сегодня ещё нет`),
+        "Напиши план одной командой — иначе вечером не соберу понятный итог:",
+        codeLine("/plan задача 1; задача 2; задача 3"),
+      ].join("\n");
+      recordOutboundCheckin(state, { userId: user.id, date, type, message: text, now });
+      messages.push({ chatId: user.telegram.telegramUserId, text });
+    }
+  }
+
   if (hour >= EVENING_START_HOUR && hour < EVENING_END_HOUR) {
     for (const user of registeredUsers) {
       const type = "evening_prompt";
