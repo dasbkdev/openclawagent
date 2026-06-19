@@ -1779,15 +1779,15 @@ async function analyzeIncomingMedia({ telegram, directTelegram, claudeClient, vo
         await telegram.sendMessage({ chatId, text: `Не удалось извлечь текст из ${mediaLabel(media)}. Могу переслать файл: «отправь это Имя».` });
         return;
       }
-      const limited = text.slice(0, 14000);
+      const limited = text.slice(0, 40000);
       const r = await claudeClient.complete({
-        system: "Ты ассистент Starlab. Анализируй документ и отвечай кратко и по делу, на русском, без Markdown-разметки.",
-        user: `${caption?.trim() || "Сделай краткий анализ документа: о чём он, ключевые пункты, требования, числа, выводы."}\n\nТекст документа:\n${limited}`,
-        maxTokens: 1400,
+        system: "Ты ассистент Starlab. Анализируй документ (включая таблицы — строки/колонки разделены табуляцией) и отвечай кратко и по делу, на русском, без Markdown-разметки.",
+        user: `${caption?.trim() || "Сделай краткий анализ документа: о чём он, ключевые пункты, требования, числа, таблицы, выводы."}\n\nТекст документа:\n${limited}`,
+        maxTokens: 1600,
       });
       const out = [title(`Документ${media.fileName ? `: ${escapeHtml(media.fileName)}` : ""}`), escapeHtml(r.text)];
       if (text.length > limited.length) {
-        out.push("", escapeHtml("(документ длинный — анализ по первым ~14 000 символам)"));
+        out.push("", escapeHtml("(документ очень длинный — анализ по первым ~40 000 символам)"));
       }
       await telegram.sendMessage({ chatId, text: out.join("\n") });
     } catch (error) {

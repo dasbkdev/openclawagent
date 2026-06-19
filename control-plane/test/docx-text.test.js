@@ -50,6 +50,18 @@ test("extractDocxText reads text from a real (built) .docx with paragraphs/tabs/
   assert.equal(readZipEntry(docx, "missing.xml"), null);
 });
 
+test("extractDocxText flattens a table into tab-separated rows", () => {
+  const xml =
+    '<?xml version="1.0"?><w:document><w:body><w:tbl>' +
+    "<w:tr><w:tc><w:p><w:r><w:t>A1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B1</w:t></w:r></w:p></w:tc></w:tr>" +
+    "<w:tr><w:tc><w:p><w:r><w:t>A2</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>B2</w:t></w:r></w:p></w:tc></w:tr>" +
+    "</w:tbl></w:body></w:document>";
+  const text = extractDocxText(buildDocx(xml));
+  assert.match(text, /A1\s*\t\s*B1/u);
+  assert.match(text, /A2\s*\t\s*B2/u);
+  assert.ok(text.indexOf("B1") < text.indexOf("A2")); // rows kept in order, on separate lines
+});
+
 test("extractDocxText returns empty string on a non-docx buffer", () => {
   assert.equal(extractDocxText(Buffer.from("not a zip")), "");
 });

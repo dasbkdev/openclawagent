@@ -89,10 +89,16 @@ export function stripDocumentXml(xml) {
   let s = String(xml || "");
   s = s.replace(/<w:tab\b[^>]*\/?>/g, "\t");
   s = s.replace(/<w:br\b[^>]*\/?>/g, "\n");
+  // Tables: a cell ends with a tab separator, a row with a newline. Done before
+  // the paragraph rule so cell paragraphs don't each become their own line.
+  s = s.replace(/<\/w:p>\s*(?=<\/w:tc>)/g, " "); // paragraphs inside a cell -> space
+  s = s.replace(/<\/w:tc>/g, "\t"); // end of table cell
+  s = s.replace(/<\/w:tr>/g, "\n"); // end of table row
   s = s.replace(/<\/w:p>/g, "\n"); // end of paragraph
   s = s.replace(/<[^>]+>/g, ""); // strip all remaining tags
   s = decodeXmlEntities(s);
   s = s.replace(/\r/g, "");
+  s = s.replace(/\t+\n/g, "\n"); // trailing cell tab before row break
   s = s.replace(/[ \t]+\n/g, "\n");
   s = s.replace(/\n{3,}/g, "\n\n");
   return s.trim();
