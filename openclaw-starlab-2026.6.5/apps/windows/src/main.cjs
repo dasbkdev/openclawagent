@@ -965,6 +965,8 @@ function safePublicConfig(config) {
   };
 }
 
+let isQuitting = false;
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1060,
@@ -981,6 +983,24 @@ function createWindow() {
     },
   });
   mainWindow.loadFile(path.join(__dirname, "renderer.html"));
+
+  // Launched at login (--hidden): start minimized so it runs quietly in the
+  // background but stays reachable from the taskbar.
+  mainWindow.once("ready-to-show", () => {
+    if (process.argv.includes("--hidden")) {
+      mainWindow.minimize();
+    }
+  });
+
+  // Closing the window must NOT stop the agent: minimize and keep running
+  // (heartbeat + command polling) so device commands keep working. Real quit
+  // goes through before-quit (isQuitting).
+  mainWindow.on("close", (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      mainWindow.minimize();
+    }
+  });
 }
 
 app.whenReady().then(() => {
@@ -988,6 +1008,7 @@ app.whenReady().then(() => {
     app.setLoginItemSettings({
       openAtLogin: true,
       path: app.getPath("exe"),
+      args: ["--hidden"],
     });
   }
 
@@ -1017,8 +1038,14 @@ app.whenReady().then(() => {
   startUpdateChecks();
 });
 
+app.on("before-quit", () => {
+  isQuitting = true;
+});
+
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  // Keep running in the background — the agent must stay reachable even with the
+  // window closed. Only truly quit when the user/OS initiated it (before-quit).
+  if (isQuitting && process.platform !== "darwin") {
     app.quit();
   }
 });
