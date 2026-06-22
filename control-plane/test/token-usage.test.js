@@ -94,6 +94,15 @@ test("token usage period resolver supports day week and month", () => {
   assert.equal(resolveTokenUsagePeriod("month", now).from, "2026-05-03T12:00:00.000Z");
 });
 
+test("token usage period resolver accepts Russian synonyms", () => {
+  assert.equal(resolveTokenUsagePeriod("день").key, "daily");
+  assert.equal(resolveTokenUsagePeriod("сегодня").key, "daily");
+  assert.equal(resolveTokenUsagePeriod("за неделю").key, "weekly");
+  assert.equal(resolveTokenUsagePeriod("неделя").key, "weekly");
+  assert.equal(resolveTokenUsagePeriod("месяц").key, "monthly");
+  assert.equal(resolveTokenUsagePeriod("за месяц").key, "monthly");
+});
+
 test("token usage rejects unknown users and missing token counts", () => {
   const state = createInitialState();
   assert.throws(

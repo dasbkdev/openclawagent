@@ -75,7 +75,7 @@ import {
   formatNaturalDeviceCommandQueued,
   tryCreateNaturalDeviceCommand,
 } from "../domain/natural-device-actions.js";
-import { readLastAssistantAnswer, recordAssistantMemoryEvent } from "../domain/assistant-memory.js";
+import { readLastAssistantAnswer, readLastUserQuestion, recordAssistantMemoryEvent } from "../domain/assistant-memory.js";
 import { listAccessibleUserIds, publicProject, publicUser } from "../domain/policy.js";
 import { buildIntegrationsHealth } from "../domain/integration-health.js";
 import { buildKickidlerActivitySummary } from "../domain/reports.js";
@@ -592,6 +592,22 @@ export async function handleTelegramMessage({
                 }
               }
             }
+          }
+
+          // "подробнее" — expand the previous concise answer in full.
+          if (isMoreDetailRequest(command.raw)) {
+            const prevQ = readLastUserQuestion(await store.load(), (resolveActorByTelegramId(await store.load(), telegramUserId) || {}).id);
+            if (prevQ) {
+              const detailed = await answerCompanyAssistant({
+                store, telegramUserId, question: prevQ, claudeClient, kickidlerClient,
+                bitrixClient, platrumClient, googleOAuthService, voyageClient, embeddingStore,
+                detailed: true, now,
+              });
+              await sendAssistantAnswer({ telegram, chatId, answer: detailed, voiceService, voiceReplyRequested });
+              return;
+            }
+            await telegram.sendMessage({ chatId, text: "Подробнее о чём? Задайте вопрос — отвечу, а потом смогу раскрыть детальнее." });
+            return;
           }
 
           if (isWebResearchQuery(command.raw)) {
@@ -1623,6 +1639,11 @@ async function maybePendingBroadcastConfirm({ store, telegram, directTelegram, c
     text: `Разослал ${delivered} сотрудникам${failed ? `, не доставлено ${failed}` : ""}.`,
   });
   return true;
+}
+
+// "подробнее" / "подробно" / "детальнее" / "раскрой" / "полный ответ" → expand.
+function isMoreDetailRequest(text) {
+  return /^\s*(подробн(?:ее|о|остей)?|детальн(?:ее|о)?|раскрой|развернуто|полный\s+ответ|поподробнее|деталей)\s*[.!?]*\s*$/iu.test(String(text || ""));
 }
 
 function mediaLabel(media) {

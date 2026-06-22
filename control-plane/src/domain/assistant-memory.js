@@ -11,6 +11,26 @@ export function ensureAssistantMemoryState(state) {
   return state.assistantMemory;
 }
 
+/** Most recent real question the user asked the assistant, or null. */
+export function readLastUserQuestion(state, userId) {
+  if (!userId) {
+    return null;
+  }
+  let best = null;
+  for (const item of state.assistantMemory || []) {
+    if (item.userId !== userId || item.role !== "user" || item.kind !== "assistant_question") {
+      continue;
+    }
+    if (!String(item.text || "").trim()) {
+      continue;
+    }
+    if (!best || String(item.createdAt || "") > String(best.createdAt || "")) {
+      best = item;
+    }
+  }
+  return best ? best.text : null;
+}
+
 /** Most recent assistant-authored answer text for a user, or null. */
 export function readLastAssistantAnswer(state, userId) {
   if (!userId) {

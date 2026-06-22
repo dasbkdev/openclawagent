@@ -16,7 +16,20 @@ import {
   isAffirmative,
   isNegative,
 } from "../src/domain/user-messaging.js";
-import { readLastAssistantAnswer } from "../src/domain/assistant-memory.js";
+import { readLastAssistantAnswer, readLastUserQuestion } from "../src/domain/assistant-memory.js";
+
+test("readLastUserQuestion returns the most recent real question", () => {
+  const state = {
+    assistantMemory: [
+      { userId: "u-nikolay", role: "user", kind: "assistant_question", text: "старый вопрос", createdAt: "2026-06-18T10:00:00Z" },
+      { userId: "u-nikolay", role: "assistant", kind: "assistant_answer", text: "ответ", createdAt: "2026-06-18T10:01:00Z" },
+      { userId: "u-nikolay", role: "user", kind: "assistant_question", text: "как дела у Бегайым?", createdAt: "2026-06-18T10:55:00Z" },
+      { userId: "u-nikolay", role: "user", kind: "user_message_relay", text: "отправь X", createdAt: "2026-06-18T11:00:00Z" },
+    ],
+  };
+  assert.equal(readLastUserQuestion(state, "u-nikolay"), "как дела у Бегайым?");
+  assert.equal(readLastUserQuestion({ assistantMemory: [] }, "u-nikolay"), null);
+});
 
 test("leadsWithConfirm detects an explicit leading confirmation", () => {
   assert.equal(leadsWithConfirm("Подтверждаю отправь бегайым"), true);

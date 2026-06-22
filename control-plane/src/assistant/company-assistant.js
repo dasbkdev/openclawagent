@@ -50,6 +50,7 @@ export async function answerCompanyAssistant({
   googleOAuthService,
   voyageClient = null,
   embeddingStore = null,
+  detailed = false,
   now = new Date(),
 }) {
   const trimmedQuestion = String(question || "").trim();
@@ -85,9 +86,9 @@ export async function answerCompanyAssistant({
   });
 
   const completion = await claudeClient.complete({
-    system: buildSystemPrompt(),
-    user: buildUserPrompt({ question: trimmedQuestion, context }),
-    maxTokens: 3000,
+    system: buildSystemPrompt({ detailed }),
+    user: buildUserPrompt({ question: trimmedQuestion, context, detailed }),
+    maxTokens: detailed ? 3000 : 1100,
   });
 
   const rendered = renderAssistantCompletion(completion.text, {
@@ -234,6 +235,14 @@ export async function answerCompanyAssistant({
     }).catch((error) => console.error("distill failed:", error instanceof Error ? error.message : error));
   }
 
+  // Concise by default → invite the user to expand. Not on detailed answers.
+  if (!detailed) {
+    const footer = "💬 Если нужен подробный ответ — напишите «подробнее».";
+    return {
+      html: `${rendered.html}\n\n${markdownToTelegramHtml(footer)}`,
+      plainText: `${rendered.plainText}\n\n${footer}`,
+    };
+  }
   return { html: rendered.html, plainText: rendered.plainText };
 }
 
@@ -1334,8 +1343,11 @@ function formatLocalDateLabel(year, month, day) {
   return `${year}-${String(Number(month)).padStart(2, "0")}-${String(Number(day)).padStart(2, "0")}`;
 }
 
-function buildSystemPrompt() {
+function buildSystemPrompt({ detailed = false } = {}) {
   return [
+    detailed
+      ? "РЕЖИМ ПОДРОБНО: дай развёрнутый, полный ответ — все факты, цифры, разбивку, причины и рекомендации. Сохрани структуру (заголовок + секции), но не сокращай."
+      : "ЛАКОНИЧНОСТЬ ПО УМОЛЧАНИЮ: ответ должен быть коротким — главный вывод + 2-4 ключевых факта. Без воды. Подробности пользователь запросит отдельно.",
     "Use context.platrum as the primary source for employees, projects, kanban tasks, daily reports, attendance, metrics and efficiency. Bitrix is legacy/fallback only.",
     "Platrum is read-only. Never claim that you changed, deleted, approved, moved or created a Platrum task.",
     "Ты корпоративный AI-ассистент Starlab Agent.",
@@ -1385,8 +1397,11 @@ function buildSystemPrompt() {
   ].join(" ");
 }
 
-function buildUserPrompt({ question, context }) {
+function buildUserPrompt({ question, context, detailed = false }) {
   return [
+    detailed
+      ? "Пользователь просит ПОДРОБНЫЙ ответ на свой предыдущий вопрос — раскрой максимально полно."
+      : "Ответь КРАТКО (главный вывод + ключевые факты).",
     "Primary work system: Platrum. Use Platrum for tasks, projects, daily reports and efficiency before any Bitrix legacy data.",
     "For questions about a specific employee, use platrum.userTasks first, then platrum.projectTasks and platrum.dailyReports.",
     `Вопрос пользователя: ${question}`,

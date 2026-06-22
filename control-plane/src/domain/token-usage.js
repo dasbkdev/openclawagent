@@ -156,9 +156,9 @@ export function buildTokenUsageSummary(state, { from, to }) {
 }
 
 export function resolveTokenUsagePeriod(period = "day", now = new Date()) {
-  const normalized = String(period || "day").toLowerCase();
+  const normalized = String(period || "day").toLowerCase().replace(/^за\s+/u, "").trim();
   const to = now;
-  if (["day", "daily", "24h", "last24h"].includes(normalized)) {
+  if (["day", "daily", "24h", "last24h", "день", "сегодня", "сутки", "дн"].includes(normalized)) {
     return {
       key: "daily",
       label: "последние 24 часа",
@@ -167,7 +167,7 @@ export function resolveTokenUsagePeriod(period = "day", now = new Date()) {
       intervalMs: DAY_MS,
     };
   }
-  if (["week", "weekly", "7d"].includes(normalized)) {
+  if (["week", "weekly", "7d", "неделя", "неделю", "неделе", "нед"].includes(normalized)) {
     return {
       key: "weekly",
       label: "последние 7 дней",
@@ -176,7 +176,7 @@ export function resolveTokenUsagePeriod(period = "day", now = new Date()) {
       intervalMs: 7 * DAY_MS,
     };
   }
-  if (["month", "monthly", "30d"].includes(normalized)) {
+  if (["month", "monthly", "30d", "месяц", "месяца", "месяце", "мес"].includes(normalized)) {
     return {
       key: "monthly",
       label: "последние 30 дней",
