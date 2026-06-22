@@ -8,6 +8,7 @@ import {
   recordAssistantMemoryEvent,
 } from "../domain/assistant-memory.js";
 import { listAssistantFacts } from "../domain/assistant-facts.js";
+import { buildEmployeeProfiles } from "../domain/employee-profile.js";
 import { retrieveRelevantFacts } from "../domain/semantic-memory.js";
 import { distillAssistantMemory } from "./memory-distiller.js";
 import { appendMemoryArchive } from "../infra/memory-archive.js";
@@ -573,6 +574,7 @@ export async function buildAssistantContext({
     dailyAssistant,
     memory,
     semanticMemory,
+    profiles: buildEmployeeProfiles(state, targetUsers),
     recentDeviceCommands,
     workHistory,
     webResearch,
@@ -1376,6 +1378,7 @@ function buildSystemPrompt({ detailed = false } = {}) {
     "Эффективность по задачам считай как completed / total * 100 только из задач, где сотрудник — исполнитель.",
     "Если в контексте есть context.workHistory — это полная хронология работы сотрудника за период из timeline (диалоги, действия агента, задачи созданы/назначены/завершены, отчёты). Для вопросов вида «что делал(а) за месяц/неделю», «история», «чем занимался» опирайся ПРЕЖДЕ ВСЕГО на workHistory: перечисли реальные события по дням/категориям, сколько задач завершено/поставлено, с кем работал. Не выдумывай — бери факты из workHistory.users[].days и totals.",
     "Если в контексте есть context.webResearch — это свежие данные из интернета по вопросу (summary + sources). Для вопросов про новости, цены/курсы, погоду, актуальные события и любые запросы «найди в интернете» опирайся на context.webResearch.summary и кратко укажи источники (домены) из context.webResearch.sources. Не выдумывай факты поверх найденного.",
+    "context.profiles — компактный профиль каждого затронутого сотрудника: роль, руководитель и устойчивые факты по категориям (обязательства, проекты, привычки, предпочтения). Используй профиль как фоновое знание о человеке (кто он, за что отвечает, что обещал, как обычно работает), но НЕ выдумывай сверх перечисленного.",
     "context.semanticMemory — это факты о сотруднике(ах), наиболее РЕЛЕВАНТНЫЕ текущему вопросу (подобраны по смыслу, не по свежести): обещания/коммитменты, предпочтения, привычки, контекст проектов (поле text, category, score). Используй их как долговременную память: если в semanticMemory есть подходящий факт — учитывай его в ответе (например «ты обещал…», «ты предпочитаешь…»). Не выдумывай факты сверх списка.",
     "Не упоминай системные токены, секреты, внутренние webhook-и или пароли.",
     "Never claim that you sent, queued, executed or completed a local device command. Real desktop actions are handled by the server before Claude is called.",
