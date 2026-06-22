@@ -22,6 +22,29 @@ export function extractDocxText(buffer) {
   return stripDocumentXml(xml.toString("utf8"));
 }
 
+/** List all entry names in a ZIP buffer. */
+export function listZipEntries(buf) {
+  const eocd = findEocd(buf);
+  if (eocd < 0) {
+    return [];
+  }
+  const cdOffset = buf.readUInt32LE(eocd + 16);
+  const cdCount = buf.readUInt16LE(eocd + 10);
+  const names = [];
+  let p = cdOffset;
+  for (let i = 0; i < cdCount; i += 1) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== CDH_SIG) {
+      break;
+    }
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    names.push(buf.toString("utf8", p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return names;
+}
+
 /** Read a single entry from a ZIP buffer by name. Returns a Buffer or null. */
 export function readZipEntry(buf, entryName) {
   const eocd = findEocd(buf);

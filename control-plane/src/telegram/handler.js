@@ -60,6 +60,7 @@ import {
   TELEGRAM_DOWNLOAD_LIMIT_BYTES,
 } from "../domain/media-actions.js";
 import { extractDocxText } from "../domain/docx-text.js";
+import { extractXlsxText } from "../domain/xlsx-text.js";
 import { classifyIntent, intentClassifierEnabled } from "../domain/intent-classifier.js";
 import {
   createDeviceCommand,
@@ -1758,6 +1759,7 @@ function mediaLabel(media) {
     case "image": return "изображение";
     case "pdf": return "PDF";
     case "docx": return "документ Word";
+    case "xlsx": return "таблицу Excel";
     case "text": return "текстовый файл";
     case "video": return "видео";
     case "audio": return "аудио";
@@ -1928,7 +1930,9 @@ async function analyzeIncomingMedia({ telegram, directTelegram, claudeClient, vo
       const bytes = await directTelegram.downloadFile({ filePath: file.file_path });
       let text = media.kind === "docx"
         ? extractDocxText(Buffer.from(bytes))
-        : Buffer.from(bytes).toString("utf8");
+        : media.kind === "xlsx"
+          ? extractXlsxText(Buffer.from(bytes))
+          : Buffer.from(bytes).toString("utf8");
       text = String(text || "").trim();
       if (!text) {
         await telegram.sendMessage({ chatId, text: `Не удалось извлечь текст из ${mediaLabel(media)}. Могу переслать файл: «отправь это Имя».` });
@@ -1955,7 +1959,7 @@ async function analyzeIncomingMedia({ telegram, directTelegram, claudeClient, vo
     chatId,
     text: [
       `Получил ${mediaLabel(media)}${media.fileName ? ` (${escapeHtml(media.fileName)})` : ""}.`,
-      "Я анализирую изображения, PDF, документы Word (.docx), текстовые файлы, видео и аудио. Файл такого типа могу только переслать сотрудникам: «отправь это Имя» или «отправь всем».",
+      "Я анализирую изображения, PDF, документы Word (.docx), таблицы Excel (.xlsx), текстовые файлы, видео и аудио. Файл такого типа могу только переслать сотрудникам: «отправь это Имя» или «отправь всем».",
     ].join("\n"),
   });
 }

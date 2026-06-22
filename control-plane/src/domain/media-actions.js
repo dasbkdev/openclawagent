@@ -41,6 +41,11 @@ export function extractIncomingMedia(message) {
       name.endsWith(".docx")
     ) {
       kind = "docx";
+    } else if (
+      mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+      name.endsWith(".xlsx")
+    ) {
+      kind = "xlsx";
     } else if (mime.startsWith("text/") || name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".csv")) {
       kind = "text";
     }
@@ -110,5 +115,5 @@ export function isTranscribable(media) {
 // Documents whose text we extract locally and analyze as plain text
 // (Word .docx, plain text/markdown/csv) — not via the vision API.
 export function isExtractableText(media) {
-  return media?.kind === "docx" || media?.kind === "text";
+  return media?.kind === "docx" || media?.kind === "xlsx" || media?.kind === "text";
 }
