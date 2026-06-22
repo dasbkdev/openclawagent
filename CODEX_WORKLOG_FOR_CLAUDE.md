@@ -9449,3 +9449,32 @@ authorized_keys via PowerShell).
   aggregates last 7 days of stored daily reports). Team summary already via /daily_report;
   project questions handled by the assistant (projectTasks/boardTasks context).
 - Tests 319 -> 327 across the batch. All commits pushed + deployed to prod (42deb65).
+
+## 2026-06-22 - OpenClaw desktop rebrand: server keystone (OpenAI bridge) + Mac plan
+
+User wants the FULL OpenClaw desktop rebranded + bound to our server + our memory +
+company-tuned. Decision: build the server keystone now (Mac offline), full Mac rebrand
+first when Mac is back, Windows after.
+
+Architecture: rebranded OpenClaw uses an openai-compatible provider pointed at our
+/v1 — so OpenClaw keeps all its features while every answer comes from our brain.
+
+Done + deployed (36aa270):
+- POST /v1/chat/completions (+ /api/v1/openai/...) + GET /v1/models on control-plane
+  (router.js). Auth: Authorization: Bearer <device token> -> findDeviceAgentByToken
+  (device-agents.js, matches sha256 tokenHash) -> answerCompanyAssistant (memory +
+  company tuning + integrations). OpenAI-shaped response. bearerToken/lastUserMessageText
+  helpers. detailed:true so no Telegram footer.
+- nginx: added `location ^~ /v1/ -> 127.0.0.1:3099` in the 443 block. GOTCHA: `cp -a`
+  on a SYMLINK created a duplicate ENABLED symlink (duplicate server block, "conflicting
+  server name") and the edit appeared not to take — removed the dup symlink, made a real
+  file backup (/etc/nginx/starlabagent.pp.ua.realbak-*), reloaded. Verified external:
+  /v1/models returns starlab-assistant; no-auth -> 401 OpenAI JSON.
+- Tests: findDeviceAgentByToken (device-agents.test.js). Suite 327 pass.
+
+Mac rebrand plan (заготовка): OPENCLAW_DESKTOP_REBRAND_RU.md — identity rebrand,
+point OpenClaw's openai provider baseURL at https://starlabagent.pp.ua/v1 with the
+device token as the apiKey, preset/lock provider, keep OpenClaw features + our device
+executor, build via pnpm starlab:mac:package, publish via publish-desktop-release.sh.
+Open: SSE streaming if a screen needs it; realtime voice off by default; Apple signing.
+Full Mac source lives only on asik's Mac (not in repo).
