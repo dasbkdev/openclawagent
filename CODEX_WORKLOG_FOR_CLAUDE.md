@@ -9478,3 +9478,31 @@ device token as the apiKey, preset/lock provider, keep OpenClaw features + our d
 executor, build via pnpm starlab:mac:package, publish via publish-desktop-release.sh.
 Open: SSE streaming if a screen needs it; realtime voice off by default; Apple signing.
 Full Mac source lives only on asik's Mac (not in repo).
+
+## 2026-06-22 - Personal-assistant contour (isolation B) — server foundation built
+
+User: install OpenClaw on Nikolay's + Anastasia's personal Macs as a FULL personal
+assistant (psychology/health/life), memory on the server but a SEPARATE area, not
+mixed with work. Decisions: isolation level B (separate process); memory visible
+only to the user; no encryption; users name their own assistant; build the
+foundation now, install on Macs later (SSH to be enabled).
+
+Built (control-plane/src/personal/, tested, NOT yet stood up on prod):
+- personal-store.js: PersonalPgStore — SEPARATE table `personal_assistant_state`,
+  ONE ROW PER USER (physical isolation + strict single-user) + PersonalMemStore for tests.
+- personal-identity.js: separate `personal_codes` + `personal_identity` tables;
+  code -> token -> exactly one user. Not tied to work device-agents.
+- personal-assistant.js: answerPersonalAssistant (warm persona for psychology/health/
+  habits; not-a-doctor disclaimers; personal memory only; Voyage semantic recall) +
+  personal fact distiller (health/mood/habit/goal/relationship). NO work integrations.
+- personal-router.js + personal-server.js: SEPARATE process on PERSONAL_PORT=3100.
+  OpenAI endpoint /v1/chat/completions (Bearer personal token -> that user only),
+  /v1/models (starlab-personal), /api/v1/personal/activate|issue-code|profile.
+- npm run personal. Tests: personal-assistant.test.js (isolation, identity, persona
+  no-work, distill). Suite 331 pass.
+
+Remaining to stand up (when asked): systemd company-personal-assistant.service,
+nginx subdomain personal.starlabagent.pp.ua -> 127.0.0.1:3100, separate backups of
+personal_* tables, issue codes for Nikolay/Anastasia. Mac install: OpenClaw provider
+= openai-compatible baseURL personal endpoint + personal token. Plan:
+PERSONAL_ASSISTANT_PLAN_RU.md. Open: SSE streaming if a screen needs it.
