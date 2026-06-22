@@ -8,6 +8,8 @@ import {
   isReplacePlanIntent,
   parseAddToPlanIntent,
   parseDeletePlanIntent,
+  parseAssignPlanIntent,
+  stripAssignConnectors,
 } from "../src/domain/natural-plan-actions.js";
 
 test("parseAddToPlanIntent extracts items after the plan keyword", () => {
@@ -102,4 +104,16 @@ test("matchPlanItemByPhrase matches by keyword and time", () => {
   assert.equal(m3.index, 3);
 
   assert.equal(matchPlanItemByPhrase(plan, "купил молоко"), null);
+});
+
+test("parseAssignPlanIntent detects assigning a plan item to someone", () => {
+  assert.equal(parseAssignPlanIntent("поставь Бегайым задачу позвонить клиенту").kind, "assign_plan");
+  assert.match(parseAssignPlanIntent("назначь Айзирек в план: проверить отчёт").remainder, /Айзирек/u);
+  assert.equal(parseAssignPlanIntent("поставь чайник"), null); // no plan/task word
+  assert.equal(parseAssignPlanIntent("какой план"), null);
+});
+
+test("stripAssignConnectors removes plan/task connector words", () => {
+  assert.equal(stripAssignConnectors("задачу позвонить клиенту"), "позвонить клиенту");
+  assert.equal(stripAssignConnectors("в план дня: проверить отчёт"), "проверить отчёт");
 });

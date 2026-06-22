@@ -31,6 +31,17 @@ const LEAD_CONFIRM = /^\s*(?:да|ага|ок|окей|подтвержда[а-�
 export function leadsWithConfirm(text) {
   return LEAD_CONFIRM.test(String(text || ""));
 }
+
+/**
+ * Turn an assistant answer into a clean message for a colleague: drop the
+ * owner-facing "Следующие шаги" tail and the "подробнее" footer, keep the body.
+ */
+export function cleanDraftForRelay(text) {
+  let s = String(text || "").replace(/\r/g, "").trim();
+  s = s.replace(/\n+\s*(следующие\s+шаги|дальнейшие\s+шаги|next\s+steps)\s*[:\n][\s\S]*$/iu, "");
+  s = s.replace(/\n+\s*💬?\s*если\s+нужен\s+подробн[\s\S]*$/iu, "");
+  return s.trim();
+}
 // Body that merely points at earlier content ("это", "эти вопросы", "свои
 // вопросы по проекту …") rather than carrying a real message to send.
 // NB: JS \b is ASCII-only and fails after Cyrillic — use a Unicode boundary.
@@ -288,6 +299,42 @@ export function peekPendingRelay(state, telegramUserId) {
 
 export function takePendingRelay(state, telegramUserId, now = new Date(), ttlMs = 5 * 60 * 1000) {
   const map = ensurePendingRelays(state);
+  const key = String(telegramUserId);
+  const pending = map[key];
+  delete map[key];
+  if (!pending) {
+    return null;
+  }
+  if (now.getTime() - new Date(pending.createdAt).getTime() > ttlMs) {
+    return null;
+  }
+  return pending;
+}
+
+// Pending plan-assignment: a manager assigns a plan item to a subordinate via
+// draft+confirm ("поставь Бегайым задачу …" → preview → "да" writes + notifies).
+function ensurePendingAssigns(state) {
+  if (!state.pendingAssigns || typeof state.pendingAssigns !== "object") {
+    state.pendingAssigns = {};
+  }
+  return state.pendingAssigns;
+}
+
+export function setPendingAssign(state, telegramUserId, payload, now = new Date()) {
+  ensurePendingAssigns(state)[String(telegramUserId)] = {
+    recipientId: payload.recipientId,
+    recipientName: payload.recipientName || null,
+    items: payload.items,
+    createdAt: now.toISOString(),
+  };
+}
+
+export function peekPendingAssign(state, telegramUserId) {
+  return ensurePendingAssigns(state)[String(telegramUserId)] || null;
+}
+
+export function takePendingAssign(state, telegramUserId, now = new Date(), ttlMs = 5 * 60 * 1000) {
+  const map = ensurePendingAssigns(state);
   const key = String(telegramUserId);
   const pending = map[key];
   delete map[key];

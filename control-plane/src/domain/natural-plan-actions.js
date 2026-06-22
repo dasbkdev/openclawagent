@@ -84,6 +84,40 @@ function splitPlanItems(text) {
     .slice(0, 20);
 }
 
+// Assigning a plan item TO ANOTHER employee ("поставь Бегайым задачу …",
+// "назначь Айзирек в план: …", "дай Перизат задачу …"). Returns the remainder
+// after the verb; the handler resolves the recipient (with the directory) and
+// strips plan/task connector words from the body.
+const ASSIGN_VERB = /^\s*(?:поставь(?:те)?|назначь(?:те)?|дай(?:те)?|задай(?:те)?)[\s,:—-]+(.+)$/isu;
+
+export function parseAssignPlanIntent(text) {
+  const raw = String(text || "").trim();
+  if (!raw || raw.startsWith("/")) {
+    return null;
+  }
+  const m = ASSIGN_VERB.exec(raw);
+  if (!m) {
+    return null;
+  }
+  // Must look like a plan/task assignment, not e.g. "поставь чайник".
+  if (!/задач|план|пункт|дел[оа]/iu.test(raw)) {
+    return null;
+  }
+  return { kind: "assign_plan", remainder: m[1].trim() };
+}
+
+/** Strip connector words ("в план дня", "задачу", "пункт") around the body. */
+export function stripAssignConnectors(text) {
+  return String(text || "")
+    .replace(/(?:^|\s)(?:в|на)\s+план[ауеыо]?(?:\s+дня|\s+на\s+сегодня)?/giu, " ")
+    .replace(/(?:^|\s)план[ауеыо]?(?:\s+дня|\s+на\s+сегодня)?/giu, " ")
+    .replace(/(?:^|\s)задач[уаи]?/giu, " ")
+    .replace(/(?:^|\s)пункт[ауыео]?/giu, " ")
+    .replace(/^[\s:,—-]+/u, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
 /**
  * "добавь к плану дня: A; B" / "добавь A, B в план" — add items to today's plan
  * (merge). Returns { kind:"add_plan", items } or null. items may be empty when

@@ -28,12 +28,15 @@ import {
   isReplacePlanIntent,
   parseAddToPlanIntent,
   parseDeletePlanIntent,
+  parseAssignPlanIntent,
+  stripAssignConnectors,
 } from "../domain/natural-plan-actions.js";
 import {
   parseRelayIntent,
   splitRecipientAndBody,
   isReferenceBody,
   leadsWithConfirm,
+  cleanDraftForRelay,
   canBroadcast,
   listBroadcastRecipients,
   setPendingBroadcast,
@@ -42,6 +45,9 @@ import {
   setPendingRelay,
   peekPendingRelay,
   takePendingRelay,
+  setPendingAssign,
+  peekPendingAssign,
+  takePendingAssign,
   isAffirmative,
   isNegative,
 } from "../domain/user-messaging.js";
@@ -503,6 +509,22 @@ export async function handleTelegramMessage({
             store, telegram, directTelegram, chatId, telegramUserId, text: command.raw, now,
           });
           if (handledRelayConfirm) {
+            return;
+          }
+
+          // "да"/"нет" answering a pending plan-assignment ("поставь Имя задачу …").
+          const handledAssignConfirm = await maybePendingAssignConfirm({
+            store, telegram, directTelegram, chatId, telegramUserId, text: command.raw, now,
+          });
+          if (handledAssignConfirm) {
+            return;
+          }
+
+          // "поставь Имя задачу …" — assign a plan item to a subordinate (confirm).
+          const handledAssign = await maybeAssignPlan({
+            store, telegram, chatId, telegramUserId, text: command.raw, now,
+          });
+          if (handledAssign) {
             return;
           }
 
@@ -1477,8 +1499,8 @@ async function maybeRelayMessage({ store, telegram, directTelegram, chatId, tele
 
   if (!body || isReferenceBody(body)) {
     // "отправь это / свои вопросы Имя" — use the assistant's last answer as the
-    // draft so the owner doesn't have to copy-paste it.
-    const draft = String(readLastAssistantAnswer(state, actor.id) || "").trim();
+    // draft so the owner doesn't have to copy-paste it (cleaned of next-steps/footer).
+    const draft = cleanDraftForRelay(readLastAssistantAnswer(state, actor.id) || "");
     if (!draft) {
       const name = escapeHtml(recipient.displayName || "Имя");
       await telegram.sendMessage({
@@ -1541,6 +1563,91 @@ async function deliverRelay({ store, telegram, directTelegram, chatId, telegramU
 
   const preview = body.length > 400 ? `${body.slice(0, 400)}…` : body;
   await telegram.sendMessage({ chatId, text: `Отправил ${escapeHtml(recipient.displayName || "сотруднику")}: «${escapeHtml(preview)}»` });
+  return true;
+}
+
+async function maybeAssignPlan({ store, telegram, chatId, telegramUserId, text, now }) {
+  const intent = parseAssignPlanIntent(text);
+  if (!intent) {
+    return false;
+  }
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  if (!actor) {
+    return false;
+  }
+  // Only managers may assign work to others.
+  if (actor.role !== "OWNER" && actor.role !== "SENIOR_PM") {
+    return false; // let the normal flow handle (e.g. a PM editing own plan)
+  }
+  const { res, body } = splitRecipientAndBody(state, intent.remainder);
+  if (res.status !== "ok") {
+    return false; // unknown/unlinked recipient — fall through to assistant
+  }
+  if (res.user.id === actor.id) {
+    return false; // assigning to self → let the normal add-to-plan flow handle
+  }
+  const items = String(stripAssignConnectors(body) || "")
+    .split(/\r?\n|[;•]|,(?!\d)/u)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (items.length === 0) {
+    await telegram.sendMessage({ chatId, text: `Что поставить ${escapeHtml(res.user.displayName || "сотруднику")} в план? Напишите: «поставь ${escapeHtml(res.user.displayName || "Имя")} задачу: текст».` });
+    return true;
+  }
+  await store.update((s) => setPendingAssign(s, telegramUserId, { recipientId: res.user.id, recipientName: res.user.displayName, items }, now));
+  await telegram.sendMessage({
+    chatId,
+    text: [
+      title(`Поставить ${escapeHtml(res.user.displayName || "сотруднику")} в план дня?`),
+      "",
+      ...items.map((i) => `• ${escapeHtml(i)}`),
+      "",
+      "Ответь «да» — добавлю ей/ему в план и уведомлю, «нет» — отменю.",
+    ].join("\n"),
+  });
+  return true;
+}
+
+async function maybePendingAssignConfirm({ store, telegram, directTelegram, chatId, telegramUserId, text, now }) {
+  const peeked = await store.load();
+  if (!peekPendingAssign(peeked, telegramUserId)) {
+    return false;
+  }
+  if (isNegative(text)) {
+    await store.update((s) => takePendingAssign(s, telegramUserId, now));
+    await telegram.sendMessage({ chatId, text: "Отменил." });
+    return true;
+  }
+  if (!isAffirmative(text)) {
+    return false;
+  }
+  const pending = await store.update((s) => takePendingAssign(s, telegramUserId, now));
+  if (!pending) {
+    await telegram.sendMessage({ chatId, text: "Черновик истёк — повторите команду." });
+    return true;
+  }
+  let recipient = null;
+  let senderName = "Руководитель";
+  try {
+    await store.update((s) => {
+      const actor = resolveActorByTelegramId(s, telegramUserId);
+      senderName = actor?.displayName || senderName;
+      recipient = (s.users || []).find((u) => u.id === pending.recipientId) || null;
+      createOrUpdateDailyPlan(s, { actor, userId: pending.recipientId, text: pending.items.join("\n"), now });
+    });
+  } catch (error) {
+    await telegram.sendMessage({ chatId, text: escapeHtml(`Не удалось поставить задачу: ${error instanceof Error ? error.message : String(error)}`) });
+    return true;
+  }
+  // Notify the recipient.
+  if (recipient?.telegram?.telegramUserId) {
+    await directTelegram.sendMessage({
+      chatId: recipient.telegram.telegramUserId,
+      text: [`📋 ${escapeHtml(senderName)} добавил(а) тебе в план дня:`, "", ...pending.items.map((i) => `• ${escapeHtml(i)}`)].join("\n"),
+    }).catch(() => {});
+  }
+  await telegram.sendMessage({ chatId, text: `Готово: поставил ${escapeHtml(recipient?.displayName || "сотруднику")} ${pending.items.length} пункт(а/ов) в план и уведомил.` });
   return true;
 }
 

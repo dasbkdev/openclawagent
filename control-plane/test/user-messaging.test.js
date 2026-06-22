@@ -31,6 +31,24 @@ test("readLastUserQuestion returns the most recent real question", () => {
   assert.equal(readLastUserQuestion({ assistantMemory: [] }, "u-nikolay"), null);
 });
 
+test("cleanDraftForRelay strips next-steps tail and 'подробнее' footer", async () => {
+  const { cleanDraftForRelay } = await import("../src/domain/user-messaging.js");
+  const draft = "Вопросы Бегайым\n\nВопрос 1\nВопрос 2\n\nСледующие шаги\n- уточни X\n\n💬 Если нужен подробный ответ — напишите «подробнее».";
+  assert.equal(cleanDraftForRelay(draft), "Вопросы Бегайым\n\nВопрос 1\nВопрос 2");
+});
+
+test("pending assign is staged, consumed once, and expires", async () => {
+  const { setPendingAssign, peekPendingAssign, takePendingAssign } = await import("../src/domain/user-messaging.js");
+  const state = {};
+  const now = new Date("2026-06-22T10:00:00Z");
+  setPendingAssign(state, "100", { recipientId: "u-pm-1", recipientName: "Бегайым", items: ["позвонить клиенту"] }, now);
+  assert.equal(peekPendingAssign(state, "100").recipientId, "u-pm-1");
+  assert.deepEqual(takePendingAssign(state, "100", now).items, ["позвонить клиенту"]);
+  assert.equal(peekPendingAssign(state, "100"), null);
+  setPendingAssign(state, "100", { recipientId: "u-pm-1", items: ["x"] }, now);
+  assert.equal(takePendingAssign(state, "100", new Date(now.getTime() + 6 * 60 * 1000)), null);
+});
+
 test("leadsWithConfirm detects an explicit leading confirmation", () => {
   assert.equal(leadsWithConfirm("Подтверждаю отправь бегайым"), true);
   assert.equal(leadsWithConfirm("да отправь Бегайым"), true);
