@@ -1,3 +1,6 @@
+import { listOpenAssistantLoops } from "./assistant-open-loops.js";
+import { findTodayPlanForUser } from "./daily-assistant.js";
+
 const DEFAULT_TIME_ZONE = "Asia/Bishkek";
 const DEFAULT_UTC_OFFSET = "+06:00";
 const MORNING_OFFSET_MINUTES = 10;
@@ -88,7 +91,7 @@ export async function collectDueScheduledAssistantMessages(
       {
         type: "morning_prompt",
         dueMinute: startMinute + MORNING_OFFSET_MINUTES,
-        text: formatMorningPrompt(user, schedule),
+        text: formatMorningPrompt(user, schedule, { state, date, now }),
       },
       {
         type: "midday_prompt",
@@ -384,17 +387,61 @@ function hasCheckin(state, userId, date, type) {
   );
 }
 
-function formatMorningPrompt(user, schedule) {
-  return [
+function formatMorningPrompt(user, schedule, { state, date, now } = {}) {
+  const lines = [
     `Доброе утро, ${user.displayName}.`,
     `Рабочий день по ${sourceLabel(schedule.source)}: ${schedule.startTime}-${schedule.endTime}.`,
+  ];
+
+  const extras = state ? buildMorningBriefExtras(state, user, date) : { carryOver: [], openLoops: [] };
+  if (extras.carryOver.length) {
+    lines.push("", "🔻 С вчера осталось незакрытым:");
+    for (const item of extras.carryOver.slice(0, 6)) {
+      lines.push(`• ${item}`);
+    }
+  }
+  if (extras.openLoops.length) {
+    lines.push("", "📌 На контроле (твои обещания/вопросы):");
+    for (const item of extras.openLoops.slice(0, 4)) {
+      lines.push(`• ${item}`);
+    }
+  }
+
+  lines.push(
     "",
-    "Я подготовлю план как черновик, а окончательное решение за тобой.",
-    "Напиши задачи через точку с запятой:",
+    "Напиши план на день (я подготовлю черновик, решение за тобой):",
     "/plan задача 1; задача 2; задача 3",
-    "",
-    "План верный или нужно что-то изменить?",
-  ].join("\n");
+  );
+  return lines.join("\n");
+}
+
+// Reliable, state-only brief data (no live integration calls in the cron):
+// yesterday's unfinished plan items + open loops (promises/questions).
+export function buildMorningBriefExtras(state, user, date) {
+  const carryOver = [];
+  const yesterday = previousDateKey(date);
+  const plans = state.dailyWorkPlans || [];
+  const yPlan = plans.find((p) => p.userId === user.id && p.date === yesterday);
+  if (yPlan) {
+    for (const item of yPlan.items || []) {
+      if (item.status !== "done") {
+        carryOver.push(String(item.title || "").trim());
+      }
+    }
+  }
+  let openLoops = [];
+  try {
+    openLoops = listOpenAssistantLoops(state, { userIds: [user.id], limit: 4 }).map((l) => String(l.text || "").trim());
+  } catch {
+    openLoops = [];
+  }
+  return { carryOver: carryOver.filter(Boolean), openLoops: openLoops.filter(Boolean) };
+}
+
+function previousDateKey(date) {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 function formatMiddayPrompt(user) {

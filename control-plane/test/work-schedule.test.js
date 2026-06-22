@@ -1,10 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildMorningBriefExtras,
   collectDueScheduledAssistantMessages,
   deriveGoogleSchedule,
   findPlatrumSchedule,
 } from "../src/domain/work-schedule.js";
+
+test("morning brief surfaces yesterday's unfinished plan items + open loops", () => {
+  const state = {
+    users: [{ id: "u-pm-1", displayName: "Бегайым" }],
+    dailyWorkPlans: [
+      { userId: "u-pm-1", date: "2026-06-21", items: [
+        { title: "созвон с Жакшылыком", status: "done" },
+        { title: "проверить фронт Метрикона", status: "planned" },
+      ] },
+    ],
+    assistantOpenLoops: [
+      { id: "l1", userId: "u-pm-1", status: "open", text: "ответить Максату по курсу ИИ", createdAt: "2026-06-21T10:00:00Z" },
+    ],
+  };
+  const extras = buildMorningBriefExtras(state, state.users[0], "2026-06-22");
+  assert.deepEqual(extras.carryOver, ["проверить фронт Метрикона"]);
+  assert.ok(extras.openLoops.some((t) => /Максату/u.test(t)));
+});
 import { getUserById } from "../src/domain/policy.js";
 import { createInitialState } from "../src/infra/seed.js";
 
