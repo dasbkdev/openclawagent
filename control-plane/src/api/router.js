@@ -15,6 +15,7 @@ import {
   createDeviceCommand,
   DEVICE_ACTION_TYPES,
   isValidDeviceAgentToken,
+  findDeviceAgentByToken,
   listVisibleDeviceCommands,
   listVisibleDeviceAgents,
   upsertDeviceAgentHeartbeat,
@@ -544,6 +545,64 @@ export function createRouter({
             answer: typeof answer === "string" ? answer : answer.plainText,
             answerHtml: typeof answer === "string" ? null : answer.html,
           },
+        });
+        return;
+      }
+
+      // OpenAI-compatible chat endpoint: lets a rebranded OpenClaw desktop (or any
+      // OpenAI client) use OUR brain — memory, company tuning, integrations all run
+      // server-side via answerCompanyAssistant. Auth: Authorization: Bearer <deviceToken>.
+      if (request.method === "POST" && (url.pathname === "/v1/chat/completions" || url.pathname === "/api/v1/openai/chat/completions")) {
+        const body = await readJsonBody(request);
+        const token = bearerToken(request);
+        const state = await store.load();
+        const agent = token ? findDeviceAgentByToken(state, token) : null;
+        if (!agent) {
+          sendJson(response, 401, { error: { message: "Invalid or missing API key (device token)", type: "invalid_request_error" } });
+          return;
+        }
+        const question = lastUserMessageText(body?.messages);
+        if (!question) {
+          sendJson(response, 400, { error: { message: "messages must include a user message", type: "invalid_request_error" } });
+          return;
+        }
+        const claudeClient = resolveClaudeClient();
+        if (!claudeClient) {
+          sendJson(response, 503, { error: { message: "Assistant is not enabled on this server", type: "server_error" } });
+          return;
+        }
+        const answer = await answerCompanyAssistant({
+          store,
+          actorUserId: agent.userId,
+          question,
+          claudeClient,
+          kickidlerClient: await resolveKickidlerClient(),
+          bitrixClient: resolveBitrixClient(),
+          platrumClient: resolvePlatrumClient(),
+          googleOAuthService,
+          voyageClient: resolveVoyageClient(),
+          embeddingStore,
+          detailed: true,
+        });
+        const content = typeof answer === "string" ? answer : answer.plainText;
+        sendJson(response, 200, {
+          id: `chatcmpl-${Date.now()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: typeof body?.model === "string" && body.model ? body.model : "starlab-assistant",
+          choices: [
+            { index: 0, message: { role: "assistant", content }, finish_reason: "stop" },
+          ],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        });
+        return;
+      }
+
+      // OpenAI-compatible model list (some clients probe this on setup).
+      if (request.method === "GET" && (url.pathname === "/v1/models" || url.pathname === "/api/v1/openai/models")) {
+        sendJson(response, 200, {
+          object: "list",
+          data: [{ id: "starlab-assistant", object: "model", created: 0, owned_by: "starlab" }],
         });
         return;
       }
@@ -1307,6 +1366,45 @@ export function syncDeviceCommandOpenLoop(state, command) {
  * acceptable because these endpoints are loopback-only (not in the nginx
  * external allowlist) and the SSRF path to loopback is now closed.
  */
+function bearerToken(request) {
+  const auth = request.headers["authorization"] || request.headers["Authorization"];
+  const value = Array.isArray(auth) ? auth[0] : auth;
+  const m = /^Bearer\s+(.+)$/iu.exec(String(value || "").trim());
+  if (m) {
+    return m[1].trim();
+  }
+  // Some clients send the key in a custom header.
+  const alt = request.headers["x-api-key"] || request.headers["x-device-agent-token"];
+  return alt ? String(Array.isArray(alt) ? alt[0] : alt).trim() : null;
+}
+
+/** Last user message text from an OpenAI-style messages array (string or parts). */
+function lastUserMessageText(messages) {
+  if (!Array.isArray(messages)) {
+    return "";
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== "user") {
+      continue;
+    }
+    if (typeof msg.content === "string") {
+      return msg.content.trim();
+    }
+    if (Array.isArray(msg.content)) {
+      const text = msg.content
+        .map((part) => (typeof part === "string" ? part : part?.type === "text" ? part.text : ""))
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+      if (text) {
+        return text;
+      }
+    }
+  }
+  return "";
+}
+
 function assertInternalToken(request, env) {
   const configured = String(env.CONTROL_PLANE_INTERNAL_TOKEN || "").trim();
   if (!configured) {

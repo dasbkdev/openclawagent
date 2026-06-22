@@ -6,6 +6,7 @@ import {
   completeDeviceCommand,
   createDeviceCommand,
   describeDeviceLastSeen,
+  findDeviceAgentByToken,
   isDeviceOnline,
   isValidDeviceAgentToken,
   listVisibleDeviceCommands,
@@ -104,6 +105,12 @@ test("device agent activation exchanges invite code for device token", () => {
     }),
     false,
   );
+
+  // OpenAI-compatible bridge resolves the user from a bare Bearer token.
+  const resolved = findDeviceAgentByToken(state, activation.deviceToken);
+  assert.equal(resolved?.userId, "u-maksat");
+  assert.equal(findDeviceAgentByToken(state, "nope"), null);
+  assert.equal(findDeviceAgentByToken(state, ""), null);
 });
 
 test("device agent visibility follows hierarchy", () => {

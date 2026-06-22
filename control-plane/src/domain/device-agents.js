@@ -303,6 +303,19 @@ export function isValidDeviceAgentToken(state, { deviceId, token }) {
   return agent.tokenHash === hashDeviceAgentToken(normalizedToken);
 }
 
+/**
+ * Resolve a device agent from a bare token (no deviceId) by matching its hash —
+ * used by the OpenAI-compatible endpoint where clients send only a Bearer token.
+ */
+export function findDeviceAgentByToken(state, token) {
+  const normalizedToken = normalizeOptionalString(token);
+  if (!normalizedToken) {
+    return null;
+  }
+  const hash = hashDeviceAgentToken(normalizedToken);
+  return (state.deviceAgents || []).find((item) => item.tokenHash === hash) || null;
+}
+
 export function listVisibleDeviceAgents(state, actor) {
   const accessibleUserIds = new Set(listAccessibleUserIds(state, actor));
   return (state.deviceAgents || [])
