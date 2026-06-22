@@ -9421,3 +9421,31 @@ then run deploy-from-git.sh. ssh-agent for the session: `source ~/.ssh-agent-env
 - Internal auth signing (X-Actor-Telegram-Id) — lower urgency now SSRF chain closed;
   do carefully (touches bot<->API + n8n).
 - macOS auto-update wiring + autostart (needs a Mac rebuild).
+
+## 2026-06-22 - "Умнее/удобнее/дееспособнее" — большой батч (5 фаз, всё задеплоено)
+
+Owner asked to make the agent smarter/more capable across a chosen subset. Done,
+tested, deployed (health-gated). New laptop: GitHub push via id_ed25519+ssh-agent
+(passphrase "das"); prod key authorized (ssh-copy-id replaced by appending pub to
+authorized_keys via PowerShell).
+
+- Phase 5 UX (503146d): concise-by-default assistant answers (maxTokens 1100) with
+  a footer inviting "подробнее"; "подробнее/детальнее/раскрой" re-answers the last
+  question in full (detailed mode). /tokens accepts Russian periods (день/неделя/месяц,
+  "за …"). readLastUserQuestion added.
+- Phase 1 proactivity (8b0e8bf): richer morning brief — yesterday's unfinished plan
+  items + open loops + schedule, then asks for today's plan (state-only, reliable).
+  EOD manager report + plan reminders already covered the rest.
+- Phase 2 memory (9295d7d): per-employee profile (buildEmployeeProfile) from
+  subject-attributed facts + role/manager → context.profiles. Promise capture already
+  via distiller newLoops (now surfaced in the brief).
+- Phase 3 (cee347c): "отправь это Имя" sends a CLEAN draft (cleanDraftForRelay strips
+  next-steps tail + подробнее footer). Write-action-with-confirm: manager assigns a
+  plan item to a subordinate — "поставь Бегайым задачу …" → preview → "да" writes to
+  her daily plan (access-checked) + notifies. (Platrum stays read-only; no write API
+  in codebase — used our own daily-plan store.)
+- Phase 4: Excel (.xlsx) analysis (61f4c5b, xlsx-text.js zero-dep, sharedStrings +
+  sheets → tab rows). Weekly team report /week_report (42deb65, buildWeeklyManagerReport
+  aggregates last 7 days of stored daily reports). Team summary already via /daily_report;
+  project questions handled by the assistant (projectTasks/boardTasks context).
+- Tests 319 -> 327 across the batch. All commits pushed + deployed to prod (42deb65).
