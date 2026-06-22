@@ -617,6 +617,84 @@ export function formatDailyProgress(progress) {
   return lines.join("\n");
 }
 
+/**
+ * Weekly roll-up for a manager from the stored daily manager reports of the last
+ * `days` days (state-based, reliable — no live integration calls). Aggregates
+ * planned/completed/overdue per day and lists the most recent risks.
+ */
+export function buildWeeklyManagerReport(state, { actor, now = new Date(), days = 7 } = {}) {
+  ensureDailyAssistantState(state);
+  const toDate = getLocalDateKey(now);
+  const fromTime = now.getTime() - (days - 1) * 24 * 60 * 60 * 1000;
+  const fromDate = getLocalDateKey(new Date(fromTime));
+
+  const mine = (state.managerReports || []).filter(
+    (r) => r.recipientUserId === actor.id && r.period === "day" && r.date >= fromDate && r.date <= toDate,
+  );
+  // One entry per day (latest generated that day).
+  const byDate = new Map();
+  for (const r of mine) {
+    const prev = byDate.get(r.date);
+    if (!prev || String(r.createdAt) > String(prev.createdAt)) {
+      byDate.set(r.date, r);
+    }
+  }
+  const dayReports = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+  let planned = 0;
+  let completed = 0;
+  let overdue = 0;
+  const effScores = [];
+  const risks = [];
+  for (const r of dayReports) {
+    planned += r.summary?.plannedTasks || 0;
+    completed += r.summary?.completedTasks || 0;
+    overdue += r.summary?.overdueTasks || 0;
+    if (Number.isFinite(r.summary?.averageEfficiency)) {
+      effScores.push(r.summary.averageEfficiency);
+    }
+    for (const risk of r.risks || []) {
+      risks.push({ ...risk, date: r.date });
+    }
+  }
+
+  return {
+    period: "week",
+    from: fromDate,
+    to: toDate,
+    activeDays: dayReports.length,
+    summary: {
+      plannedTasks: planned,
+      completedTasks: completed,
+      overdueTasks: overdue,
+      averageEfficiency: effScores.length ? effScores.reduce((s, v) => s + v, 0) / effScores.length : null,
+    },
+    risks: risks.slice(-12),
+  };
+}
+
+export function formatWeeklyManagerReport(report) {
+  const lines = [
+    title(`Недельный отчёт ${report.from} — ${report.to}`),
+    kv("Дней с отчётами", report.activeDays),
+    "",
+    subtitle("Итоги недели"),
+    kv("Средняя эффективность", formatPercent(report.summary.averageEfficiency)),
+    kv("План выполнен", `${report.summary.completedTasks}/${report.summary.plannedTasks}`),
+    kv("Просрочено задач (сумма по дням)", report.summary.overdueTasks),
+  ];
+  if (report.activeDays === 0) {
+    lines.push("", "За неделю ещё нет сохранённых дневных отчётов — недельная сводка наполнится по мере их формирования.");
+  }
+  if (report.risks.length) {
+    lines.push("", subtitle("Повторяющиеся риски"));
+    for (const risk of report.risks.slice(0, 10)) {
+      lines.push(`- ${escapeHtml(risk.userDisplayName)} (${risk.date}): ${escapeHtml(risk.message)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
 export function formatManagerReport(report) {
   const lines = [
     title(`Ежедневный отчет за ${report.date}`),

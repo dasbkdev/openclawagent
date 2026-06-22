@@ -42,6 +42,7 @@ test("Telegram command menu exposes only useful product commands", () => {
     "blocker",
     "done",
     "daily_report",
+    "week_report",
     "platrum",
     "bitrix",
     "report",

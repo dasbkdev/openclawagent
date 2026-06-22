@@ -146,6 +146,26 @@ test("plan reminder fires in the afternoon only when no plan exists yet", () => 
   assert.equal(withPlan.some((m) => /плана на сегодня ещё нет/u.test(m.text)), false);
 });
 
+test("weekly manager report aggregates the last 7 days of stored daily reports", async () => {
+  const { buildWeeklyManagerReport, formatWeeklyManagerReport } = await import("../src/domain/daily-assistant.js");
+  const now = new Date("2026-06-22T12:00:00Z");
+  const state = createInitialState({ BOOTSTRAP_OWNER_TELEGRAM_ID: "999" });
+  const owner = getUserById(state, "u-nikolay");
+  state.managerReports = [
+    { recipientUserId: owner.id, period: "day", date: "2026-06-19", createdAt: "2026-06-19T19:00:00Z", summary: { plannedTasks: 4, completedTasks: 3, overdueTasks: 1, averageEfficiency: 0.7 }, risks: [{ userDisplayName: "Бегайым", message: "просрочка" }] },
+    { recipientUserId: owner.id, period: "day", date: "2026-06-20", createdAt: "2026-06-20T19:00:00Z", summary: { plannedTasks: 2, completedTasks: 2, overdueTasks: 0, averageEfficiency: 0.9 }, risks: [] },
+    { recipientUserId: owner.id, period: "day", date: "2026-06-10", createdAt: "2026-06-10T19:00:00Z", summary: { plannedTasks: 9, completedTasks: 0, overdueTasks: 9, averageEfficiency: 0 }, risks: [] }, // >7d ago, excluded
+  ];
+  const report = buildWeeklyManagerReport(state, { actor: owner, now });
+  assert.equal(report.activeDays, 2);
+  assert.equal(report.summary.plannedTasks, 6);
+  assert.equal(report.summary.completedTasks, 5);
+  assert.equal(report.summary.overdueTasks, 1);
+  const text = formatWeeklyManagerReport(report);
+  assert.match(text, /Недельный отчёт/u);
+  assert.match(text, /5\/6/u);
+});
+
 test("daily assistant prompts are sent once per local day window", () => {
   const state = createInitialState({ BOOTSTRAP_OWNER_TELEGRAM_ID: "999" });
   ensureDailyAssistantState(state);

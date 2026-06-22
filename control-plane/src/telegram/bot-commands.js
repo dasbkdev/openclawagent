@@ -13,6 +13,7 @@ export const TELEGRAM_BOT_COMMANDS = Object.freeze([
   { command: "blocker", description: "записать проблему" },
   { command: "done", description: "отметить пункт плана" },
   { command: "daily_report", description: "дневной отчет команды" },
+  { command: "week_report", description: "недельный отчёт команды" },
   { command: "platrum", description: "задачи и канбан Platrum" },
   { command: "bitrix", description: "старый алиас для Platrum" },
   { command: "report", description: "отчет активности трекера" },

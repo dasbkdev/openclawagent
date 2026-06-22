@@ -5,6 +5,8 @@ import { buildPlatrumProjectStatusReport } from "../domain/platrum-reports.js";
 import {
   addDailyBlocker,
   buildDailyManagerReport,
+  buildWeeklyManagerReport,
+  formatWeeklyManagerReport,
   buildDailyProgress,
   createOrUpdateDailyPlan,
   formatBlockerResult,
@@ -412,6 +414,10 @@ export async function handleTelegramMessage({
           selector: getCommandRemainder(command),
           now,
         });
+        return;
+
+      case "week_report":
+        await sendWeeklyReport({ store, telegram, chatId, telegramUserId, now });
         return;
 
       case "daily_report":
@@ -2050,6 +2056,17 @@ async function sendDailyReport({ store, telegram, chatId, telegramUserId, kickid
   });
 
   await sendLongMessage({ telegram, chatId, text: formatManagerReport(report) });
+}
+
+async function sendWeeklyReport({ store, telegram, chatId, telegramUserId, now }) {
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  if (!actor || (actor.role !== "OWNER" && actor.role !== "SENIOR_PM")) {
+    await telegram.sendMessage({ chatId, text: "Недельный отчёт доступен руководителю (OWNER/SENIOR_PM)." });
+    return;
+  }
+  const report = buildWeeklyManagerReport(state, { actor, now });
+  await sendLongMessage({ telegram, chatId, text: formatWeeklyManagerReport(report) });
 }
 
 async function sendTokenUsageReport({ store, telegram, chatId, telegramUserId, periodName, now }) {
