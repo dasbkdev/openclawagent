@@ -9506,3 +9506,28 @@ nginx subdomain personal.starlabagent.pp.ua -> 127.0.0.1:3100, separate backups 
 personal_* tables, issue codes for Nikolay/Anastasia. Mac install: OpenClaw provider
 = openai-compatible baseURL personal endpoint + personal token. Plan:
 PERSONAL_ASSISTANT_PLAN_RU.md. Open: SSE streaming if a screen needs it.
+
+## 2026-06-23 - Voice activity timeline (голосовой табель) + Excel report
+
+Per Nikolay/Maksat: every linked employee sends voices anytime; bot logs who/when/
+stated-time/activity; managers export one Excel for the QC dept (ОКК) to cross-check
+with cameras. Decisions: log ABSOLUTELY every voice; one sheet with everyone + can
+request a single employee; live report (any date/week); Bishkek TZ.
+
+Done + deployed (ae08838, 336 tests):
+- domain/xlsx-write.js: zero-dep .xlsx WRITER (inline strings + DEFLATE/CRC32 zip).
+  Gotcha: typing the control-char strip regex embedded literal control bytes ->
+  rewrote escapeText as a charCode loop (no literal control chars). Round-trips via
+  xlsx-text reader.
+- domain/voice-timeline.js: recordVoiceActivity (pairs начало/конец into intervals
+  with durationMinutes, links задание), listVoiceActivity, buildVoiceTimelineRows,
+  buildVoiceTimelineXlsx (one sheet, Bishkek times). Collection state.voiceTimeline.
+- assistant/voice-extract.js: Claude extraction { statedTime, kind, activity,
+  relatedPerson, cleanedText, isQuestion } using the employee's same-day timeline as
+  context for chaining; keyword+leading-time fallback. Never invents times.
+- handler: captureVoiceActivity after STT logs EVERY voice from a linked employee +
+  records to assistantMemory; pure activity -> short ack; question -> silent log +
+  assistant answers. /timeline (=/voice_report) for OWNER/SENIOR_PM/developer ->
+  builds + sends the .xlsx (optional employee name + period today/вчера/неделя/date).
+  telegram-api sendDocument now uploads a { buffer, filename, contentType }.
+- STT language pinned to "ru" (accuracy). Tests +5.
