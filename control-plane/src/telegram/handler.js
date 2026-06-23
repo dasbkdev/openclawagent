@@ -63,6 +63,13 @@ import {
 } from "../domain/media-actions.js";
 import { extractDocxText } from "../domain/docx-text.js";
 import { extractXlsxText } from "../domain/xlsx-text.js";
+import {
+  recordVoiceActivity,
+  listVoiceActivity,
+  buildVoiceTimelineXlsx,
+  localDateKey as voiceLocalDateKey,
+} from "../domain/voice-timeline.js";
+import { extractVoiceActivity } from "../assistant/voice-extract.js";
 import { classifyIntent, intentClassifierEnabled } from "../domain/intent-classifier.js";
 import {
   createDeviceCommand,
@@ -171,6 +178,14 @@ export async function handleTelegramMessage({
         throw new VoiceServiceError("Не получилось распознать голосовое сообщение. Попробуй сказать короче или отправь текстом.");
       }
       voiceReplyRequested = voiceService.wantsVoiceReply(transcript.text);
+
+      // Voice activity timeline: log EVERY voice from a linked employee.
+      const captured = await captureVoiceActivity({
+        store, telegram, claudeClient, chatId, telegramUserId, transcript: transcript.text, now,
+      });
+      if (captured && !captured.isQuestion) {
+        return; // pure activity log — already acked, no assistant noise
+      }
       command = parseTelegramCommand(transcript.text);
     }
 
@@ -418,6 +433,11 @@ export async function handleTelegramMessage({
 
       case "week_report":
         await sendWeeklyReport({ store, telegram, chatId, telegramUserId, now });
+        return;
+
+      case "timeline":
+      case "voice_report":
+        await sendVoiceTimelineReport({ store, telegram, directTelegram, chatId, telegramUserId, args: command.args || [], now });
         return;
 
       case "daily_report":
@@ -1753,6 +1773,128 @@ async function maybePendingBroadcastConfirm({ store, telegram, directTelegram, c
     text: `Разослал ${delivered} сотрудникам${failed ? `, не доставлено ${failed}` : ""}.`,
   });
   return true;
+}
+
+// Log EVERY voice from a linked employee into the activity timeline. Returns
+// { isQuestion } so the caller can still route genuine questions to the
+// assistant, or null when the sender is not a linked employee.
+async function captureVoiceActivity({ store, telegram, claudeClient, chatId, telegramUserId, transcript, now }) {
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  if (!actor) {
+    return null; // unregistered — handled by the normal flow
+  }
+  const day = voiceLocalDateKey(now);
+  const dayEntries = listVoiceActivity(state, { userIds: [actor.id] }).filter((e) => e.date === day);
+  let extracted;
+  try {
+    extracted = await extractVoiceActivity({ claudeClient, transcript, dayEntries, now });
+  } catch {
+    extracted = { kind: "заметка", statedTime: null, activity: transcript.slice(0, 200), relatedPerson: null, cleanedText: transcript, isQuestion: false };
+  }
+
+  let saved;
+  await store.update((s) => {
+    saved = recordVoiceActivity(s, {
+      userId: actor.id,
+      arrivalAt: now,
+      extracted,
+      transcript: extracted.cleanedText || transcript,
+      rawTranscript: transcript,
+    });
+    recordAssistantMemoryEvent(s, {
+      userId: actor.id,
+      channel: "telegram",
+      role: "user",
+      kind: "voice_activity",
+      text: extracted.cleanedText || transcript,
+      target: { userId: actor.id, date: saved.date },
+      metadata: { statedTime: saved.statedTime, voiceKind: saved.kind, activity: saved.activity },
+      now,
+    });
+  });
+
+  const isQuestion = Boolean(extracted.isQuestion);
+  // A question/request goes to the assistant (answered there) — no redundant ack.
+  // A pure activity gets a short confirmation. Either way it is logged.
+  if (!isQuestion) {
+    await telegram.sendMessage({ chatId, text: formatVoiceAck(saved) }).catch(() => {});
+  }
+  return { isQuestion, entry: saved };
+}
+
+function formatVoiceAck(entry) {
+  const parts = [`📝 Записал (${entry.kind})`];
+  const when = entry.statedTime ? `🕒 ${entry.statedTime}` : null;
+  if (when) {
+    parts.push(when);
+  }
+  if (entry.activity) {
+    parts.push(escapeHtml(entry.activity));
+  }
+  if (entry.kind === "конец" && typeof entry.durationMinutes === "number") {
+    parts.push(`⏱ ${entry.durationMinutes} мин`);
+  }
+  return parts.join(" · ");
+}
+
+async function sendVoiceTimelineReport({ store, telegram, directTelegram, chatId, telegramUserId, args, now }) {
+  const state = await store.load();
+  const actor = resolveActorByTelegramId(state, telegramUserId);
+  const devIds = new Set(String(process.env.DEVELOPER_TELEGRAM_IDS || "984834133").split(/[,\s]+/u).filter(Boolean));
+  const allowed = actor && (actor.role === "OWNER" || actor.role === "SENIOR_PM") || devIds.has(String(telegramUserId));
+  if (!allowed) {
+    await telegram.sendMessage({ chatId, text: "Отчёт по голосовым доступен Николаю, Максату и разработчику." });
+    return;
+  }
+
+  // Parse optional period + optional employee name from args.
+  const { from, to, label } = resolveVoicePeriod(args, now);
+  let userIds = null;
+  let scopeLabel = "все сотрудники";
+  const nameArg = args.filter((a) => !/^(сегодня|вчера|неделя|week|today|yesterday|\d{4}-\d{2}-\d{2})$/iu.test(a)).join(" ").trim();
+  if (nameArg) {
+    const match = (state.users || []).find((u) =>
+      [u.displayName, u.telegram?.firstName, u.id, u.platrumUsername].filter(Boolean).some((n) => String(n).toLowerCase().includes(nameArg.toLowerCase())),
+    );
+    if (!match) {
+      await telegram.sendMessage({ chatId, text: `Не нашёл сотрудника «${escapeHtml(nameArg)}». Список — /users.` });
+      return;
+    }
+    userIds = [match.id];
+    scopeLabel = match.displayName;
+  }
+
+  const entries = listVoiceActivity(state, { userIds, from, to });
+  if (entries.length === 0) {
+    await telegram.sendMessage({ chatId, text: `Голосовых записей за период (${label}, ${scopeLabel}) пока нет.` });
+    return;
+  }
+  const buffer = buildVoiceTimelineXlsx(state, { userIds, from, to });
+  const filename = `voice-timeline-${label}${userIds ? `-${scopeLabel}` : ""}.xlsx`.replace(/\s+/gu, "_");
+  await directTelegram.sendDocument({
+    chatId,
+    document: { buffer, filename, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+    caption: `Голосовой табель · ${label} · ${scopeLabel} · записей: ${entries.length}`,
+  });
+}
+
+function resolveVoicePeriod(args, now) {
+  const tz = "Asia/Bishkek";
+  const day = voiceLocalDateKey(now);
+  const lower = args.map((a) => a.toLowerCase());
+  const isoArg = args.find((a) => /^\d{4}-\d{2}-\d{2}$/u.test(a));
+  if (lower.includes("неделя") || lower.includes("week")) {
+    return { from: new Date(now.getTime() - 7 * 86400000).toISOString(), to: now.toISOString(), label: "за неделю" };
+  }
+  if (lower.includes("вчера") || lower.includes("yesterday")) {
+    const y = voiceLocalDateKey(new Date(now.getTime() - 86400000));
+    return { from: `${y}T00:00:00+06:00`, to: `${y}T23:59:59+06:00`, label: y };
+  }
+  if (isoArg) {
+    return { from: `${isoArg}T00:00:00+06:00`, to: `${isoArg}T23:59:59+06:00`, label: isoArg };
+  }
+  return { from: `${day}T00:00:00+06:00`, to: `${day}T23:59:59+06:00`, label: day };
 }
 
 // "подробнее" / "подробно" / "детальнее" / "раскрой" / "полный ответ" → expand.

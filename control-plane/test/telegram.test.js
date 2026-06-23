@@ -43,6 +43,7 @@ test("Telegram command menu exposes only useful product commands", () => {
     "done",
     "daily_report",
     "week_report",
+    "timeline",
     "platrum",
     "bitrix",
     "report",

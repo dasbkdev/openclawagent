@@ -8,7 +8,7 @@ export function createVoiceServiceFromEnv(env = process.env) {
   const replyMode = env.VOICE_REPLY_MODE || "on_request";
   const sttProvider = (env.STT_PROVIDER || "elevenlabs").toLowerCase();
   const sttModel = env.STT_MODEL || (sttProvider === "openai" ? "gpt-4o-transcribe" : "scribe_v2");
-  const sttLanguageCode = env.STT_LANGUAGE_CODE || "";
+  const sttLanguageCode = env.STT_LANGUAGE_CODE || "ru";
   const elevenLabsApiKey = env.ELEVENLABS_API_KEY || "";
   const sttApiKey = env.STT_API_KEY || "";
   const ttsClient = new ElevenLabsTtsClient({

@@ -44,6 +44,21 @@ export class TelegramBotApi {
   }
 
   async sendDocument({ chatId, document, caption }) {
+    // Buffer upload ({ buffer, filename, contentType }) vs file_id forward (string).
+    if (document && typeof document === "object" && document.buffer) {
+      const form = new FormData();
+      form.append("chat_id", String(chatId));
+      form.append(
+        "document",
+        new Blob([document.buffer], { type: document.contentType || "application/octet-stream" }),
+        document.filename || "file.bin",
+      );
+      if (caption) {
+        form.append("caption", caption);
+        form.append("parse_mode", "HTML");
+      }
+      return await this.callMultipart("sendDocument", form);
+    }
     return await this.call("sendDocument", withCaption({ chat_id: chatId, document }, caption));
   }
 
