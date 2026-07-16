@@ -60,6 +60,29 @@ fn toggle_main_window(app: &AppHandle) {
     }
 }
 
+#[tauri::command]
+fn read_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn write_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_dir(path: String) -> Result<Vec<String>, String> {
+    let entries = std::fs::read_dir(&path).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let suffix = if entry.path().is_dir() { "/" } else { "" };
+        out.push(format!("{name}{suffix}"));
+    }
+    out.sort();
+    Ok(out)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Ctrl+Alt+Space (Win/Linux) / Cmd+Alt+Space feel — Modifiers::SUPER also works on macOS.
@@ -67,7 +90,12 @@ pub fn run() {
     let toggle_for_handler = toggle;
 
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![run_command])
+        .invoke_handler(tauri::generate_handler![
+            run_command,
+            read_file,
+            write_file,
+            list_dir
+        ])
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  type AgentMessage,
   type BrainSettings,
   type ChatMessage,
   fetchModels,
@@ -18,6 +19,7 @@ import {
 } from "./store";
 import { Markdown } from "./Markdown";
 import { Terminal } from "./Terminal";
+import { runAgent } from "./agent";
 
 export function App() {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
@@ -30,6 +32,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
+  const [agentMode, setAgentMode] = useState(false);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -102,24 +105,36 @@ export function App() {
     const controller = new AbortController();
     abortRef.current = controller;
     const system = settings.systemPrompt.trim();
-    const payload: ChatMessage[] = [
-      ...(system ? [{ role: "system" as const, content: system }] : []),
-      ...history.map(({ role, content }) => ({ role, content })),
-    ];
+    const append = (delta: string) =>
+      patchActive((c) => ({
+        ...c,
+        messages: c.messages.map((m) =>
+          m.id === assistantMsg.id ? { ...m, content: m.content + delta } : m,
+        ),
+      }));
 
     try {
-      await streamChat(
-        settings,
-        payload,
-        (delta) =>
-          patchActive((c) => ({
-            ...c,
-            messages: c.messages.map((m) =>
-              m.id === assistantMsg.id ? { ...m, content: m.content + delta } : m,
-            ),
-          })),
-        controller.signal,
-      );
+      if (agentMode) {
+        const agentSystem =
+          (system ? system + "\n\n" : "") +
+          "У тебя есть инструменты (терминал, файлы). Используй их, чтобы выполнять задачи " +
+          "на компьютере пользователя, затем дай краткий итог.";
+        const agentHistory: AgentMessage[] = [
+          { role: "system", content: agentSystem },
+          ...history.map(({ role, content }) => ({ role, content })),
+        ];
+        await runAgent(
+          settings,
+          agentHistory,
+          { onText: append, onStep: (label) => append(`\n${label}\n`), signal: controller.signal },
+        );
+      } else {
+        const payload: ChatMessage[] = [
+          ...(system ? [{ role: "system" as const, content: system }] : []),
+          ...history.map(({ role, content }) => ({ role, content })),
+        ];
+        await streamChat(settings, payload, append, controller.signal);
+      }
     } catch (e) {
       if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -259,6 +274,13 @@ export function App() {
         {error && <div className="error">⚠ {error}</div>}
 
         <div className="composer">
+          <button
+            className={`agent-toggle ${agentMode ? "on" : ""}`}
+            title={agentMode ? "Агент включён: использует терминал и файлы" : "Включить агента (инструменты)"}
+            onClick={() => setAgentMode((a) => !a)}
+          >
+            🛠
+          </button>
           <textarea
             value={input}
             placeholder="Сообщение…  (Enter — отправить, Shift+Enter — перенос)"

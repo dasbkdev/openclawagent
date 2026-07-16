@@ -2,6 +2,7 @@ import { appendAuditEvent } from "../infra/audit.js";
 import fs from "node:fs";
 import path from "node:path";
 import { answerCompanyAssistant } from "../assistant/company-assistant.js";
+import { runAgentTurn } from "../assistant/openai-tools-bridge.js";
 import { buildBitrixProjectStatusReport, buildBitrixUserStatusReport } from "../domain/bitrix-reports.js";
 import { buildPlatrumProjectStatusReport, buildPlatrumUserStatusReport } from "../domain/platrum-reports.js";
 import {
@@ -569,6 +570,17 @@ export function createRouter({
         const claudeClient = resolveClaudeClient();
         if (!claudeClient) {
           sendJson(response, 503, { error: { message: "Assistant is not enabled on this server", type: "server_error" } });
+          return;
+        }
+        // Tool-calling mode: when the caller sends `tools`, act as a raw agent turn (the
+        // client runs the tools and sends results back) instead of the RAG assistant.
+        if (Array.isArray(body?.tools) && body.tools.length > 0) {
+          try {
+            const completion = await runAgentTurn({ claudeClient, body });
+            sendJson(response, 200, completion);
+          } catch (err) {
+            sendJson(response, 502, { error: { message: `Agent turn failed: ${err?.message || err}`, type: "server_error" } });
+          }
           return;
         }
         const answer = await answerCompanyAssistant({

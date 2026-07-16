@@ -4,6 +4,25 @@
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
+export type ToolCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+// A message in an agent conversation (adds tool-calling roles/fields over ChatMessage).
+export type AgentMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+};
+
+export type ToolDef = {
+  type: "function";
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+};
+
 export type BrainSettings = {
   endpoint: string; // e.g. http://127.0.0.1:3099 or the LAN/VPS bridge URL
   apiKey: string;
@@ -36,6 +55,40 @@ export function loadSettings(): BrainSettings {
 
 export function saveSettings(settings: BrainSettings): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+/**
+ * One tool-calling turn: POST messages + tools, return the assistant message (which may
+ * carry tool_calls). The control-plane bridge answers non-streaming with tool_calls when
+ * the model wants a tool (see openai-tools-bridge.js).
+ */
+export async function chatWithTools(
+  settings: BrainSettings,
+  messages: AgentMessage[],
+  tools: ToolDef[],
+  signal?: AbortSignal,
+): Promise<AgentMessage> {
+  const url = settings.endpoint.replace(/\/+$/, "") + "/v1/chat/completions";
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ model: settings.model, messages, tools, tool_choice: "auto" }),
+    signal,
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Мозг ответил ${res.status}: ${detail.slice(0, 200)}`);
+  }
+  const json = await res.json();
+  const msg = json?.choices?.[0]?.message;
+  return {
+    role: "assistant",
+    content: msg?.content ?? null,
+    tool_calls: Array.isArray(msg?.tool_calls) ? msg.tool_calls : undefined,
+  };
 }
 
 /** List models the bridge advertises (GET /v1/models). Empty list on any failure. */
