@@ -26,8 +26,105 @@ body,
 
 .app {
   display: flex;
-  flex-direction: column;
   height: 100vh;
+}
+
+.sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: #0c0e13;
+  border-right: 1px solid #000;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  gap: 8px;
+}
+
+.new-chat {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid #2a2f3a;
+  border-radius: 10px;
+  padding: 9px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.new-chat:hover {
+  border-color: var(--accent);
+}
+
+.conv-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conv {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.conv:hover {
+  background: var(--panel);
+}
+
+.conv.active {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.conv-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.conv-del {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.conv:hover .conv-del {
+  opacity: 1;
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 8px;
+}
+
+.dot.on {
+  background: #4ade80;
+}
+
+.dot.off {
+  background: var(--danger);
+}
+
+.dot.unknown {
+  background: var(--muted);
 }
 
 .titlebar {
@@ -191,4 +288,94 @@ body,
   color: #0b0e14;
   border: none;
   font-weight: 600;
+}
+
+.settings select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+/* markdown in assistant bubbles */
+.bubble p {
+  margin: 0 0 8px;
+}
+
+.bubble p:last-child {
+  margin-bottom: 0;
+}
+
+.bubble ul,
+.bubble ol {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.bubble code {
+  background: #0c0e13;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.bubble a {
+  color: var(--accent);
+}
+
+.bubble table {
+  border-collapse: collapse;
+  margin: 6px 0;
+}
+
+.bubble th,
+.bubble td {
+  border: 1px solid #2a2f3a;
+  padding: 4px 8px;
+}
+
+.codeblock {
+  position: relative;
+  margin: 8px 0;
+}
+
+.codeblock pre {
+  background: #0c0e13;
+  border: 1px solid #20242e;
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 0;
+}
+
+.codeblock pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12.5px;
+}
+
+.codeblock .copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: #20242e;
+  color: var(--muted);
+  border: none;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.codeblock:hover .copy {
+  opacity: 1;
+}
+
+.typing {
+  color: var(--muted);
 }

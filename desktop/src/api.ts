@@ -33,6 +33,36 @@ export function saveSettings(settings: BrainSettings): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
+/** List models the bridge advertises (GET /v1/models). Empty list on any failure. */
+export async function fetchModels(settings: BrainSettings): Promise<string[]> {
+  try {
+    const url = settings.endpoint.replace(/\/+$/, "") + "/v1/models";
+    const headers: Record<string, string> = {};
+    if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) return [];
+    const json = await res.json();
+    const data: unknown = json?.data;
+    if (!Array.isArray(data)) return [];
+    return data.map((m) => String((m as { id?: unknown })?.id ?? "")).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** True if the bridge is reachable (used for the connection dot). */
+export async function ping(settings: BrainSettings): Promise<boolean> {
+  try {
+    const url = settings.endpoint.replace(/\/+$/, "") + "/v1/models";
+    const headers: Record<string, string> = {};
+    if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(4000) });
+    return res.ok || res.status === 401; // 401 still means the server is up
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Stream a chat completion. Calls `onDelta` with each text chunk as it arrives.
  * Aborts cleanly if `signal` fires. Throws on HTTP / network errors.

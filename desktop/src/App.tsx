@@ -1,13 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type BrainSettings,
   type ChatMessage,
+  fetchModels,
   loadSettings,
+  ping,
   saveSettings,
   streamChat,
 } from "./api";
-
-type UiMessage = ChatMessage & { id: number };
+import {
+  type Conversation,
+  type StoredMessage,
+  loadConversations,
+  newConversation,
+  saveConversations,
+  titleFrom,
+} from "./store";
+import { Markdown } from "./Markdown";
 
 const SYSTEM_PROMPT: ChatMessage = {
   role: "system",
@@ -15,29 +24,65 @@ const SYSTEM_PROMPT: ChatMessage = {
 };
 
 export function App() {
-  const [messages, setMessages] = useState<UiMessage[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>(() => {
+    const list = loadConversations();
+    return list.length ? list : [newConversation()];
+  });
+  const [activeId, setActiveId] = useState<string>(() => "");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
+  const [online, setOnline] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  const active = useMemo(
+    () => conversations.find((c) => c.id === activeId) ?? conversations[0],
+    [conversations, activeId],
+  );
+
+  useEffect(() => {
+    if (!activeId && conversations[0]) setActiveId(conversations[0].id);
+  }, [activeId, conversations]);
+
+  useEffect(() => saveConversations(conversations), [conversations]);
+
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+  }, [active?.messages]);
+
+  useEffect(() => {
+    let alive = true;
+    const check = () => ping(settings).then((ok) => alive && setOnline(ok));
+    void check();
+    const t = setInterval(check, 15000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [settings]);
+
+  function patchActive(fn: (c: Conversation) => Conversation) {
+    setConversations((prev) => prev.map((c) => (c.id === active?.id ? fn(c) : c)));
+  }
 
   async function send() {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text || busy || !active) return;
     setError(null);
     setInput("");
 
-    const userMsg: UiMessage = { id: Date.now(), role: "user", content: text };
-    const assistantMsg: UiMessage = { id: Date.now() + 1, role: "assistant", content: "" };
-    const history = [...messages, userMsg];
-    setMessages([...history, assistantMsg]);
+    const userMsg: StoredMessage = { id: Date.now(), role: "user", content: text };
+    const assistantMsg: StoredMessage = { id: Date.now() + 1, role: "assistant", content: "" };
+    const history = [...active.messages, userMsg];
+    patchActive((c) => ({
+      ...c,
+      messages: [...history, assistantMsg],
+      title: c.messages.length === 0 ? titleFrom(history) : c.title,
+      updatedAt: Date.now(),
+    }));
     setBusy(true);
 
     const controller = new AbortController();
@@ -51,11 +96,13 @@ export function App() {
       await streamChat(
         settings,
         payload,
-        (delta) => {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMsg.id ? { ...m, content: m.content + delta } : m)),
-          );
-        },
+        (delta) =>
+          patchActive((c) => ({
+            ...c,
+            messages: c.messages.map((m) =>
+              m.id === assistantMsg.id ? { ...m, content: m.content + delta } : m,
+            ),
+          })),
         controller.signal,
       );
     } catch (e) {
@@ -71,6 +118,19 @@ export function App() {
     setBusy(false);
   }
 
+  function createConversation() {
+    const conv = newConversation();
+    setConversations((prev) => [conv, ...prev]);
+    setActiveId(conv.id);
+  }
+
+  function deleteConversation(id: string) {
+    setConversations((prev) => {
+      const next = prev.filter((c) => c.id !== id);
+      return next.length ? next : [newConversation()];
+    });
+  }
+
   function persistSettings(next: BrainSettings) {
     setSettings(next);
     saveSettings(next);
@@ -78,54 +138,98 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="titlebar" data-tauri-drag-region>
-        <span className="brand">✦ Starlab</span>
-        <div className="spacer" />
-        <button className="icon-btn" title="Настройки" onClick={() => setShowSettings((s) => !s)}>
-          ⚙
+      <aside className="sidebar">
+        <button className="new-chat" onClick={createConversation}>
+          ＋ Новая беседа
         </button>
-      </header>
+        <div className="conv-list">
+          {conversations.map((c) => (
+            <div
+              key={c.id}
+              className={`conv ${c.id === active?.id ? "active" : ""}`}
+              onClick={() => setActiveId(c.id)}
+            >
+              <span className="conv-title">{c.title}</span>
+              <button
+                className="conv-del"
+                title="Удалить"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteConversation(c.id);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </aside>
 
-      {showSettings && (
-        <SettingsPanel settings={settings} onSave={persistSettings} onClose={() => setShowSettings(false)} />
-      )}
-
-      <div className="messages" ref={listRef}>
-        {messages.length === 0 && (
-          <div className="empty">Спроси что угодно — я подключён к твоему мозгу Starlab.</div>
-        )}
-        {messages.map((m) => (
-          <div key={m.id} className={`msg ${m.role}`}>
-            <div className="bubble">{m.content || (m.role === "assistant" && busy ? "…" : "")}</div>
-          </div>
-        ))}
-      </div>
-
-      {error && <div className="error">⚠ {error}</div>}
-
-      <div className="composer">
-        <textarea
-          value={input}
-          placeholder="Сообщение…  (Enter — отправить, Shift+Enter — перенос)"
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          rows={2}
-        />
-        {busy ? (
-          <button className="send stop" onClick={stop}>
-            Стоп
+      <main className="main">
+        <header className="titlebar" data-tauri-drag-region>
+          <span className="brand">✦ Starlab</span>
+          <span className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`} title={online ? "Мозг на связи" : "Нет связи с мозгом"} />
+          <div className="spacer" />
+          <button className="icon-btn" title="Настройки" onClick={() => setShowSettings((s) => !s)}>
+            ⚙
           </button>
-        ) : (
-          <button className="send" onClick={() => void send()}>
-            ➤
-          </button>
+        </header>
+
+        {showSettings && (
+          <SettingsPanel
+            settings={settings}
+            onSave={persistSettings}
+            onClose={() => setShowSettings(false)}
+          />
         )}
-      </div>
+
+        <div className="messages" ref={listRef}>
+          {(!active || active.messages.length === 0) && (
+            <div className="empty">Спроси что угодно — я подключён к твоему мозгу Starlab.</div>
+          )}
+          {active?.messages.map((m) => (
+            <div key={m.id} className={`msg ${m.role}`}>
+              <div className="bubble">
+                {m.role === "assistant" ? (
+                  m.content ? (
+                    <Markdown text={m.content} />
+                  ) : (
+                    busy && <span className="typing">…</span>
+                  )
+                ) : (
+                  m.content
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {error && <div className="error">⚠ {error}</div>}
+
+        <div className="composer">
+          <textarea
+            value={input}
+            placeholder="Сообщение…  (Enter — отправить, Shift+Enter — перенос)"
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            rows={2}
+          />
+          {busy ? (
+            <button className="send stop" onClick={stop}>
+              Стоп
+            </button>
+          ) : (
+            <button className="send" onClick={() => void send()}>
+              ➤
+            </button>
+          )}
+        </div>
+      </main>
     </div>
   );
 }
@@ -136,6 +240,13 @@ function SettingsPanel(props: {
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(props.settings);
+  const [models, setModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    void fetchModels(draft).then(setModels);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.endpoint, draft.apiKey]);
+
   return (
     <div className="settings">
       <label>
@@ -148,7 +259,18 @@ function SettingsPanel(props: {
       </label>
       <label>
         Модель
-        <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />
+        {models.length ? (
+          <select value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })}>
+            {!models.includes(draft.model) && <option value={draft.model}>{draft.model}</option>}
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />
+        )}
       </label>
       <label>
         API-ключ
@@ -156,7 +278,7 @@ function SettingsPanel(props: {
           type="password"
           value={draft.apiKey}
           onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
-          placeholder="Bearer-токен моста (если задан)"
+          placeholder="Bearer-токен моста"
         />
       </label>
       <div className="settings-actions">
