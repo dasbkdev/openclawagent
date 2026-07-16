@@ -290,13 +290,19 @@ body,
   font-weight: 600;
 }
 
-.settings select {
+.settings select,
+.settings textarea {
   background: var(--panel);
   color: var(--text);
   border: 1px solid #2a2f3a;
   border-radius: 8px;
   padding: 8px 10px;
   font: inherit;
+}
+
+.settings .sys-prompt {
+  resize: vertical;
+  min-height: 56px;
 }
 
 /* markdown in assistant bubbles */

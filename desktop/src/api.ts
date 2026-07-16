@@ -8,7 +8,11 @@ export type BrainSettings = {
   endpoint: string; // e.g. http://127.0.0.1:3099 or the LAN/VPS bridge URL
   apiKey: string;
   model: string;
+  systemPrompt: string;
 };
+
+export const DEFAULT_SYSTEM_PROMPT =
+  "Ты — персональный ассистент Starlab. Отвечай кратко и по делу, на русском.";
 
 const SETTINGS_KEY = "starlab.brain.settings";
 
@@ -17,6 +21,7 @@ export const DEFAULT_SETTINGS: BrainSettings = {
   endpoint: "http://127.0.0.1:3099",
   apiKey: "", // personal/device bearer token issued by the control-plane
   model: "starlab-personal", // the bridge advertises this via /v1/models; it routes by token
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
 };
 
 export function loadSettings(): BrainSettings {

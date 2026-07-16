@@ -19,11 +19,6 @@ import {
 import { Markdown } from "./Markdown";
 import { Terminal } from "./Terminal";
 
-const SYSTEM_PROMPT: ChatMessage = {
-  role: "system",
-  content: "Ты — персональный ассистент Starlab. Отвечай кратко и по делу, на русском.",
-};
-
 export function App() {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const list = loadConversations();
@@ -106,8 +101,9 @@ export function App() {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    const system = settings.systemPrompt.trim();
     const payload: ChatMessage[] = [
-      SYSTEM_PROMPT,
+      ...(system ? [{ role: "system" as const, content: system }] : []),
       ...history.map(({ role, content }) => ({ role, content })),
     ];
 
@@ -335,6 +331,15 @@ function SettingsPanel(props: {
           value={draft.apiKey}
           onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
           placeholder="Bearer-токен моста"
+        />
+      </label>
+      <label>
+        Характер ассистента (system prompt)
+        <textarea
+          className="sys-prompt"
+          rows={3}
+          value={draft.systemPrompt}
+          onChange={(e) => setDraft({ ...draft, systemPrompt: e.target.value })}
         />
       </label>
       <div className="settings-actions">
