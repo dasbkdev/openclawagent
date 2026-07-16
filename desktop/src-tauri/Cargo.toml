@@ -1,0 +1,25 @@
+[package]
+name = "starlab-desktop"
+version = "0.1.0"
+description = "Starlab native desktop assistant"
+authors = ["Starlab"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "starlab_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-store = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# by default Tauri runs in production mode; devtools are on in debug builds
+custom-protocol = ["tauri/custom-protocol"]

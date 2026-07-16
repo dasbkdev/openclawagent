@@ -1,0 +1,13 @@
+node_modules/
+dist/
+# Rust / Tauri build output
+src-tauri/target/
+src-tauri/gen/
+# Generated icons (run `npm run tauri icon <logo.png>`)
+src-tauri/icons/*.png
+src-tauri/icons/*.ico
+src-tauri/icons/*.icns
+# local secrets / signing material
+*.pfx
+*.p12
+.env
