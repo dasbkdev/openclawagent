@@ -13,7 +13,7 @@ export type Conversation = {
   messages: StoredMessage[];
 };
 
-const KEY = "starlab.conversations";
+const KEY = "sai.conversations";
 const TITLE_CAP = 40;
 
 export function loadConversations(): Conversation[] {

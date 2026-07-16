@@ -115,7 +115,7 @@ pub fn run() {
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("Starlab")
+                .tooltip("SAI")
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => app.exit(0),
@@ -132,5 +132,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Starlab desktop");
+        .expect("error while running SAI desktop");
 }

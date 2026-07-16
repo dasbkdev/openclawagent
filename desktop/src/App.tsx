@@ -216,7 +216,7 @@ export function App() {
 
       <main className="main">
         <header className="titlebar" data-tauri-drag-region>
-          <span className="brand">✦ Starlab</span>
+          <span className="brand">✦ SAI</span>
           <span className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`} title={online ? "Мозг на связи" : "Нет связи с мозгом"} />
           <div className="spacer" />
           <button
@@ -241,7 +241,7 @@ export function App() {
 
         <div className="messages" ref={listRef}>
           {(!active || active.messages.length === 0) && (
-            <div className="empty">Спроси что угодно — я подключён к твоему мозгу Starlab.</div>
+            <div className="empty">Спроси что угодно — я подключён к твоему мозгу SAI.</div>
           )}
           {active?.messages.map((m, i) => {
             const isLast = i === active.messages.length - 1;

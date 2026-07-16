@@ -1,8 +1,8 @@
 {
-  "name": "starlab-desktop",
+  "name": "sai-desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "Starlab native desktop assistant (Tauri). Rename product in src-tauri/tauri.conf.json.",
+  "description": "SAI native desktop assistant (Tauri).",
   "type": "module",
   "scripts": {
     "dev": "vite",

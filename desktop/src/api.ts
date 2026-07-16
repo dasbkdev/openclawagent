@@ -31,9 +31,9 @@ export type BrainSettings = {
 };
 
 export const DEFAULT_SYSTEM_PROMPT =
-  "Ты — персональный ассистент Starlab. Отвечай кратко и по делу, на русском.";
+  "Ты — персональный ассистент SAI. Отвечай кратко и по делу, на русском.";
 
-const SETTINGS_KEY = "starlab.brain.settings";
+const SETTINGS_KEY = "sai.brain.settings";
 
 export const DEFAULT_SETTINGS: BrainSettings = {
   // control-plane OpenAI bridge (see control-plane/src/api/router.js, /v1/chat/completions).
@@ -147,7 +147,7 @@ export async function streamChat(
     throw new Error(`Мозг ответил ${response.status}: ${detail.slice(0, 200)}`);
   }
 
-  // The Starlab bridge currently answers with a single JSON completion (non-streaming) and
+  // The SAI bridge currently answers with a single JSON completion (non-streaming) and
   // ignores stream:true. Detect that and emit the whole answer at once; still handle true
   // SSE for when/if the bridge starts streaming.
   const contentType = response.headers.get("content-type") ?? "";

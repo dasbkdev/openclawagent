@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Starlab",
+  "productName": "SAI",
   "version": "0.1.0",
-  "identifier": "ua.pp.starlabagent.desktop",
+  "identifier": "ua.pp.starlabagent.sai",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Starlab",
+        "title": "SAI",
         "label": "main",
         "width": 440,
         "height": 680,
