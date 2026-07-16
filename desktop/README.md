@@ -10,10 +10,14 @@ OpenAI-compatible bridge (`/v1/chat/completions`, streaming) — no second brain
 
 ## Phase status
 
-- **Phase 0/1 (this scaffold):** window, system tray, global hotkey (Ctrl/⌘+Alt+Space to
-  toggle), settings (brain endpoint / model / key), streaming chat.
-- Next: tool-calling + terminal, memory/RAG panel, model catalog, voice, plugins (see the
-  desktop plan). A native SwiftUI macOS shell over the same brain can come later (Phase 2).
+- **Done:** window, system tray, global hotkey (Ctrl/⌘+Alt+Space), streaming chat with
+  markdown/code blocks, conversations sidebar (persisted), model catalog + connection dot,
+  message actions (copy/regenerate), Ctrl/⌘+N new chat, and a **built-in terminal** (⌘ in
+  the header) that runs shell commands via the Rust `run_command` (PowerShell on Windows,
+  bash elsewhere; `cd` persists the working dir).
+- **Next:** agent tool-calling (the terminal + file tools driven by the model — needs the
+  bridge to speak tool-calls), memory/RAG panel, voice (STT/TTS), plugins. A native SwiftUI
+  macOS shell over the same brain can come later (Phase 2).
 
 ## Prerequisites
 

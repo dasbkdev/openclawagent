@@ -1,12 +1,53 @@
 // Native shell: window + system tray + a global hotkey (Ctrl/Cmd+Alt+Space) to toggle the
 // window. The brain lives elsewhere (control-plane OpenAI bridge); this is just the face.
 
+use std::process::Command;
+
+use serde::Serialize;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     AppHandle, Manager,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+
+#[derive(Serialize)]
+pub struct CommandResult {
+    stdout: String,
+    stderr: String,
+    code: i32,
+}
+
+// Run one shell command in the built-in terminal. This is a personal tool on the Owner's
+// own machine — the terminal is an explicit feature (OpenClaw parity), so it executes what
+// the user (or later the agent, with confirmation) asks. PowerShell on Windows, bash elsewhere.
+#[tauri::command]
+fn run_command(cmd: String, cwd: Option<String>) -> CommandResult {
+    let mut command = if cfg!(target_os = "windows") {
+        let mut c = Command::new("powershell.exe");
+        c.arg("-NoProfile").arg("-Command").arg(&cmd);
+        c
+    } else {
+        let mut c = Command::new("bash");
+        c.arg("-lc").arg(&cmd);
+        c
+    };
+    if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
+        command.current_dir(dir);
+    }
+    match command.output() {
+        Ok(out) => CommandResult {
+            stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+            code: out.status.code().unwrap_or(-1),
+        },
+        Err(e) => CommandResult {
+            stdout: String::new(),
+            stderr: format!("не удалось запустить: {e}"),
+            code: -1,
+        },
+    }
+}
 
 fn toggle_main_window(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
@@ -26,6 +67,7 @@ pub fn run() {
     let toggle_for_handler = toggle;
 
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![run_command])
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()

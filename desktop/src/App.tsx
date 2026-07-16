@@ -17,6 +17,7 @@ import {
   titleFrom,
 } from "./store";
 import { Markdown } from "./Markdown";
+import { Terminal } from "./Terminal";
 
 const SYSTEM_PROMPT: ChatMessage = {
   role: "system",
@@ -33,6 +34,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -206,6 +208,13 @@ export function App() {
           <span className="brand">✦ Starlab</span>
           <span className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`} title={online ? "Мозг на связи" : "Нет связи с мозгом"} />
           <div className="spacer" />
+          <button
+            className={`icon-btn ${showTerminal ? "active" : ""}`}
+            title="Терминал"
+            onClick={() => setShowTerminal((s) => !s)}
+          >
+            ⌘
+          </button>
           <button className="icon-btn" title="Настройки" onClick={() => setShowSettings((s) => !s)}>
             ⚙
           </button>
@@ -248,6 +257,8 @@ export function App() {
             );
           })}
         </div>
+
+        {showTerminal && <Terminal onClose={() => setShowTerminal(false)} />}
 
         {error && <div className="error">⚠ {error}</div>}
 
