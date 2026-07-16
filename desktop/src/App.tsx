@@ -54,6 +54,18 @@ export function App() {
   }, [active?.messages]);
 
   useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        createConversation();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     let alive = true;
     const check = () => ping(settings).then((ok) => alive && setOnline(ok));
     void check();
@@ -70,13 +82,18 @@ export function App() {
 
   async function send() {
     const text = input.trim();
+    if (!text) return;
+    setInput("");
+    await sendText(text);
+  }
+
+  async function sendText(text: string, base?: StoredMessage[]) {
     if (!text || busy || !active) return;
     setError(null);
-    setInput("");
 
     const userMsg: StoredMessage = { id: Date.now(), role: "user", content: text };
     const assistantMsg: StoredMessage = { id: Date.now() + 1, role: "assistant", content: "" };
-    const history = [...active.messages, userMsg];
+    const history = [...(base ?? active.messages), userMsg];
     patchActive((c) => ({
       ...c,
       messages: [...history, assistantMsg],
@@ -116,6 +133,25 @@ export function App() {
   function stop() {
     abortRef.current?.abort();
     setBusy(false);
+  }
+
+  async function regenerate() {
+    if (busy || !active) return;
+    // Drop the trailing assistant reply and the last user turn, then resend that user text.
+    const msgs = [...active.messages];
+    while (msgs.length && msgs[msgs.length - 1].role === "assistant") msgs.pop();
+    const lastUser = msgs.pop();
+    if (!lastUser) return;
+    patchActive((c) => ({ ...c, messages: msgs }));
+    await sendText(lastUser.content, msgs);
+  }
+
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // clipboard blocked — ignore
+    }
   }
 
   function createConversation() {
@@ -187,21 +223,30 @@ export function App() {
           {(!active || active.messages.length === 0) && (
             <div className="empty">Спроси что угодно — я подключён к твоему мозгу Starlab.</div>
           )}
-          {active?.messages.map((m) => (
-            <div key={m.id} className={`msg ${m.role}`}>
-              <div className="bubble">
-                {m.role === "assistant" ? (
-                  m.content ? (
-                    <Markdown text={m.content} />
+          {active?.messages.map((m, i) => {
+            const isLast = i === active.messages.length - 1;
+            return (
+              <div key={m.id} className={`msg ${m.role}`}>
+                <div className="bubble">
+                  {m.role === "assistant" ? (
+                    m.content ? (
+                      <Markdown text={m.content} />
+                    ) : (
+                      busy && <span className="typing">…</span>
+                    )
                   ) : (
-                    busy && <span className="typing">…</span>
-                  )
-                ) : (
-                  m.content
+                    m.content
+                  )}
+                </div>
+                {m.role === "assistant" && m.content && !busy && (
+                  <div className="msg-actions">
+                    <button onClick={() => void copyText(m.content)}>копировать</button>
+                    {isLast && <button onClick={() => void regenerate()}>↻ заново</button>}
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {error && <div className="error">⚠ {error}</div>}

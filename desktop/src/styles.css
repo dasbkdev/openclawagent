@@ -379,3 +379,28 @@ body,
 .typing {
   color: var(--muted);
 }
+
+.msg-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.msg:hover .msg-actions {
+  opacity: 1;
+}
+
+.msg-actions button {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.msg-actions button:hover {
+  color: var(--text);
+}
