@@ -23,23 +23,38 @@ export type ToolDef = {
   function: { name: string; description: string; parameters: Record<string, unknown> };
 };
 
+// "bridge" = our brain's OpenAI-compatible endpoint (control-plane / nikolay_ai).
+// "anthropic" = talk to Claude directly with an Anthropic API key (self-contained).
+export type Provider = "bridge" | "anthropic";
+
 export type BrainSettings = {
-  endpoint: string; // e.g. http://127.0.0.1:3099 or the LAN/VPS bridge URL
-  apiKey: string;
+  provider: Provider;
+  endpoint: string; // bridge only — e.g. http://127.0.0.1:3099 or the LAN/VPS URL
+  apiKey: string; // bridge bearer token OR Anthropic API key, depending on provider
   model: string;
   systemPrompt: string;
 };
 
 export const DEFAULT_SYSTEM_PROMPT =
-  "Ты — персональный ассистент SAI. Отвечай кратко и по делу, на русском.";
+  "Ты — SAI, личный ассистент-агент на компьютере пользователя. У тебя есть инструменты " +
+  "(терминал, файлы, поиск, скриншот, веб). Действуй проактивно и доводи задачи до конца, " +
+  "разрушительные действия подтверждай. Отвечай кратко и по делу, на русском.";
+
+// Known Claude models offered when the provider is Anthropic (newest first).
+export const ANTHROPIC_MODELS = [
+  "claude-opus-4-8",
+  "claude-sonnet-4-6",
+  "claude-haiku-4-5",
+];
 
 const SETTINGS_KEY = "sai.brain.settings";
 
 export const DEFAULT_SETTINGS: BrainSettings = {
-  // control-plane OpenAI bridge (see control-plane/src/api/router.js, /v1/chat/completions).
-  endpoint: "http://127.0.0.1:3099",
-  apiKey: "", // personal/device bearer token issued by the control-plane
-  model: "starlab-personal", // the bridge advertises this via /v1/models; it routes by token
+  // Route through the nikolay_ai brain (memory + integrations) over Tailscale by default.
+  provider: "bridge",
+  endpoint: "https://nikolay-brain.taile8c475.ts.net",
+  apiKey: "", // Bearer = brain_api_token; paste in ⚙
+  model: "nikolay-assistant",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
 };
 
@@ -91,8 +106,9 @@ export async function chatWithTools(
   };
 }
 
-/** List models the bridge advertises (GET /v1/models). Empty list on any failure. */
+/** List models available for the current provider. */
 export async function fetchModels(settings: BrainSettings): Promise<string[]> {
+  if (settings.provider === "anthropic") return ANTHROPIC_MODELS;
   try {
     const url = settings.endpoint.replace(/\/+$/, "") + "/v1/models";
     const headers: Record<string, string> = {};
@@ -108,8 +124,9 @@ export async function fetchModels(settings: BrainSettings): Promise<string[]> {
   }
 }
 
-/** True if the bridge is reachable (used for the connection dot). */
+/** True if the provider looks ready (used for the connection dot). */
 export async function ping(settings: BrainSettings): Promise<boolean> {
+  if (settings.provider === "anthropic") return settings.apiKey.trim().length > 0;
   try {
     const url = settings.endpoint.replace(/\/+$/, "") + "/v1/models";
     const headers: Record<string, string> = {};

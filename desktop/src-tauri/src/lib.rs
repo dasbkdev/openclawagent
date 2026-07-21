@@ -65,9 +65,39 @@ fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+// Base64 of a file's raw bytes — used to feed images (screenshots, pasted pictures) to the
+// vision model. Kept native so the agent can hand a path straight to Claude.
+#[tauri::command]
+fn read_file_base64(path: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(STANDARD.encode(bytes))
+}
+
 #[tauri::command]
 fn write_file(path: String, content: String) -> Result<(), String> {
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+// Targeted edit: replace exactly `old` with `new`. Fails if `old` is absent or ambiguous
+// (appears more than once) — same discipline as a code-editing tool, so the agent can't
+// silently clobber the wrong place.
+#[tauri::command]
+fn edit_file(path: String, old: String, new: String) -> Result<String, String> {
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let count = content.matches(&old).count();
+    if count == 0 {
+        return Err("фрагмент old не найден в файле".into());
+    }
+    if count > 1 {
+        return Err(format!("фрагмент old встречается {count} раз — сделай его уникальным"));
+    }
+    let updated = content.replacen(&old, &new, 1);
+    std::fs::write(&path, updated).map_err(|e| e.to_string())?;
+    Ok("файл изменён".into())
 }
 
 #[tauri::command]
@@ -83,6 +113,125 @@ fn list_dir(path: String) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+const WALK_MAX_ENTRIES: usize = 20_000;
+const SKIP_DIRS: &[&str] = &["node_modules", ".git", "target", "dist", "build", ".venv", "__pycache__"];
+
+fn walk(root: &std::path::Path, mut visit: impl FnMut(&std::path::Path) -> bool) {
+    let mut stack = vec![root.to_path_buf()];
+    let mut seen = 0usize;
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            seen += 1;
+            if seen > WALK_MAX_ENTRIES {
+                return;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if SKIP_DIRS.contains(&name.as_str()) {
+                    continue;
+                }
+                stack.push(path);
+            } else if !visit(&path) {
+                return;
+            }
+        }
+    }
+}
+
+// Find files whose name contains `pattern` (case-insensitive) under `root`. Cheap glob-lite.
+#[tauri::command]
+fn find_files(root: String, pattern: String, max: Option<usize>) -> Result<Vec<String>, String> {
+    let cap = max.unwrap_or(200);
+    let needle = pattern.to_lowercase();
+    let mut out = Vec::new();
+    walk(std::path::Path::new(&root), |path| {
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if needle.is_empty() || name.to_lowercase().contains(&needle) {
+                out.push(path.to_string_lossy().into_owned());
+            }
+        }
+        out.len() < cap
+    });
+    Ok(out)
+}
+
+// Grep: lines containing `query` (case-insensitive) in text files under `root`.
+#[tauri::command]
+fn search_files(root: String, query: String, max: Option<usize>) -> Result<Vec<String>, String> {
+    let cap = max.unwrap_or(200);
+    let needle = query.to_lowercase();
+    if needle.is_empty() {
+        return Err("пустой запрос".into());
+    }
+    let mut out = Vec::new();
+    walk(std::path::Path::new(&root), |path| {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            for (i, line) in text.lines().enumerate() {
+                if line.to_lowercase().contains(&needle) {
+                    let trimmed = line.trim();
+                    let snippet: String = trimmed.chars().take(200).collect();
+                    out.push(format!("{}:{}: {}", path.to_string_lossy(), i + 1, snippet));
+                    if out.len() >= cap {
+                        return false;
+                    }
+                }
+            }
+        }
+        out.len() < cap
+    });
+    Ok(out)
+}
+
+// Open a file, folder, or URL with the OS default handler.
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let result = if cfg!(target_os = "windows") {
+        Command::new("cmd").args(["/C", "start", "", &path]).spawn()
+    } else if cfg!(target_os = "macos") {
+        Command::new("open").arg(&path).spawn()
+    } else {
+        Command::new("xdg-open").arg(&path).spawn()
+    };
+    result.map(|_| ()).map_err(|e| e.to_string())
+}
+
+// Capture the whole screen to a temp PNG and return its path (feed to vision via base64).
+// Uses the OS's own tooling so we don't drag in a screen-capture crate.
+#[tauri::command]
+fn screenshot() -> Result<String, String> {
+    let mut file = std::env::temp_dir();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    file.push(format!("sai-shot-{stamp}.png"));
+    let path = file.to_string_lossy().into_owned();
+
+    let status = if cfg!(target_os = "windows") {
+        let ps = format!(
+            "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; \
+             $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; \
+             $bmp=New-Object System.Drawing.Bitmap($b.Width,$b.Height); \
+             $g=[System.Drawing.Graphics]::FromImage($bmp); \
+             $g.CopyFromScreen($b.X,$b.Y,0,0,$bmp.Size); \
+             $bmp.Save('{}',[System.Drawing.Imaging.ImageFormat]::Png)",
+            path.replace('\\', "\\\\")
+        );
+        Command::new("powershell.exe").args(["-NoProfile", "-Command", &ps]).status()
+    } else if cfg!(target_os = "macos") {
+        Command::new("screencapture").args(["-x", &path]).status()
+    } else {
+        Command::new("import").args(["-window", "root", &path]).status()
+    };
+    match status {
+        Ok(s) if s.success() => Ok(path),
+        Ok(s) => Err(format!("screenshot завершился с кодом {:?}", s.code())),
+        Err(e) => Err(format!("не удалось сделать скриншот: {e}")),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Ctrl+Alt+Space (Win/Linux) / Cmd+Alt+Space feel — Modifiers::SUPER also works on macOS.
@@ -93,8 +242,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             run_command,
             read_file,
+            read_file_base64,
             write_file,
-            list_dir
+            edit_file,
+            list_dir,
+            find_files,
+            search_files,
+            open_path,
+            screenshot
         ])
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(

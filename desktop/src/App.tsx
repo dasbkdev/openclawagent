@@ -20,6 +20,7 @@ import {
 import { Markdown } from "./Markdown";
 import { Terminal } from "./Terminal";
 import { runAgent } from "./agent";
+import { runAnthropicAgent, streamAnthropicChat } from "./anthropic";
 
 export function App() {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
@@ -136,18 +137,26 @@ export function App() {
       if (agentMode) {
         const agentSystem =
           (system ? system + "\n\n" : "") +
-          "У тебя есть инструменты (терминал, файлы). Используй их, чтобы выполнять задачи " +
-          "на компьютере пользователя, затем дай краткий итог.";
+          "У тебя есть инструменты (терминал, файлы, поиск, скриншот, веб). Используй их, чтобы " +
+          "выполнять задачи на компьютере пользователя, затем дай краткий итог.";
         const agentHistory: AgentMessage[] = [
           { role: "system", content: agentSystem },
           ...history.map(({ role, content }) => ({ role, content })),
         ];
-        await runAgent(settings, agentHistory, {
+        const cbs = {
           onText: append,
-          onStep: (label) => append(`\n${label}\n`),
+          onStep: (label: string) => append(`\n${label}\n`),
           onApprove,
           signal: controller.signal,
-        });
+        };
+        if (settings.provider === "anthropic") await runAnthropicAgent(settings, agentHistory, cbs);
+        else await runAgent(settings, agentHistory, cbs);
+      } else if (settings.provider === "anthropic") {
+        const agentHistory: AgentMessage[] = [
+          ...(system ? [{ role: "system" as const, content: system }] : []),
+          ...history.map(({ role, content }) => ({ role, content })),
+        ];
+        await streamAnthropicChat(settings, agentHistory, append, controller.signal);
       } else {
         const payload: ChatMessage[] = [
           ...(system ? [{ role: "system" as const, content: system }] : []),
@@ -368,13 +377,25 @@ function SettingsPanel(props: {
   return (
     <div className="settings">
       <label>
-        Адрес мозга
-        <input
-          value={draft.endpoint}
-          onChange={(e) => setDraft({ ...draft, endpoint: e.target.value })}
-          placeholder="http://127.0.0.1:3099"
-        />
+        Провайдер
+        <select
+          value={draft.provider}
+          onChange={(e) => setDraft({ ...draft, provider: e.target.value as BrainSettings["provider"] })}
+        >
+          <option value="anthropic">Claude напрямую (Anthropic API)</option>
+          <option value="bridge">Мозг SAI (мост control-plane / nikolay_ai)</option>
+        </select>
       </label>
+      {draft.provider === "bridge" && (
+        <label>
+          Адрес мозга
+          <input
+            value={draft.endpoint}
+            onChange={(e) => setDraft({ ...draft, endpoint: e.target.value })}
+            placeholder="http://127.0.0.1:3099"
+          />
+        </label>
+      )}
       <label>
         Модель
         {models.length ? (
@@ -391,12 +412,12 @@ function SettingsPanel(props: {
         )}
       </label>
       <label>
-        API-ключ
+        {draft.provider === "anthropic" ? "Anthropic API-ключ" : "API-ключ моста"}
         <input
           type="password"
           value={draft.apiKey}
           onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
-          placeholder="Bearer-токен моста"
+          placeholder={draft.provider === "anthropic" ? "sk-ant-…" : "Bearer-токен моста"}
         />
       </label>
       <label>

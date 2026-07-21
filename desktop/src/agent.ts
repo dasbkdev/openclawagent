@@ -59,15 +59,95 @@ export const TOOLS: ToolDef[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "edit_file",
+      description:
+        "Точечно заменить фрагмент в файле: old меняется на new. old должен встречаться ровно один раз.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          old: { type: "string", description: "точный существующий фрагмент" },
+          new: { type: "string", description: "чем заменить" },
+        },
+        required: ["path", "old", "new"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "find_files",
+      description: "Найти файлы по подстроке в имени рекурсивно от корневой папки.",
+      parameters: {
+        type: "object",
+        properties: {
+          root: { type: "string", description: "с какой папки искать" },
+          pattern: { type: "string", description: "подстрока имени файла" },
+        },
+        required: ["root", "pattern"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_files",
+      description: "Grep: найти строки, содержащие запрос, в текстовых файлах под корневой папкой.",
+      parameters: {
+        type: "object",
+        properties: {
+          root: { type: "string" },
+          query: { type: "string" },
+        },
+        required: ["root", "query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "open_path",
+      description: "Открыть файл, папку или URL в приложении по умолчанию (проводник/браузер).",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "screenshot",
+      description:
+        "Сделать скриншот всего экрана. Возвращает путь к PNG — затем можно попросить пользователя показать его или проанализировать зрением.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "http_get",
+      description: "Загрузить содержимое URL (текст/HTML/JSON). Для чтения веб-страниц и API.",
+      parameters: {
+        type: "object",
+        properties: { url: { type: "string" } },
+        required: ["url"],
+      },
+    },
+  },
 ];
 
 const MAX_STEPS = 8;
 
 // Tools that change the system need explicit user approval before they run.
-const DESTRUCTIVE = new Set(["run_command", "write_file"]);
+export const DESTRUCTIVE = new Set(["run_command", "write_file", "edit_file"]);
 
 /** Human-readable one-liner describing what a destructive tool call will do. */
-function describeCall(name: string, args: Record<string, unknown>): string {
+export function describeCall(name: string, args: Record<string, unknown>): string {
   if (name === "run_command") {
     const cwd = args.cwd ? ` (в ${String(args.cwd)})` : "";
     return `Выполнить команду${cwd}:\n${String(args.cmd ?? "")}`;
@@ -77,10 +157,13 @@ function describeCall(name: string, args: Record<string, unknown>): string {
     const preview = content.length > 400 ? content.slice(0, 400) + "…" : content;
     return `Записать файл ${String(args.path ?? "")}:\n${preview}`;
   }
+  if (name === "edit_file") {
+    return `Изменить файл ${String(args.path ?? "")}:\n- ${String(args.old ?? "")}\n+ ${String(args.new ?? "")}`;
+  }
   return `${name}(${JSON.stringify(args)})`;
 }
 
-async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+export async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
   try {
     switch (name) {
       case "run_command": {
@@ -98,8 +181,40 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       case "write_file":
         await invoke("write_file", { path: String(args.path ?? ""), content: String(args.content ?? "") });
         return "записано";
+      case "edit_file":
+        return await invoke<string>("edit_file", {
+          path: String(args.path ?? ""),
+          old: String(args.old ?? ""),
+          new: String(args.new ?? ""),
+        });
       case "list_dir":
         return (await invoke<string[]>("list_dir", { path: String(args.path ?? "") })).join("\n");
+      case "find_files":
+        return (
+          await invoke<string[]>("find_files", {
+            root: String(args.root ?? ""),
+            pattern: String(args.pattern ?? ""),
+            max: 200,
+          })
+        ).join("\n") || "ничего не найдено";
+      case "search_files":
+        return (
+          await invoke<string[]>("search_files", {
+            root: String(args.root ?? ""),
+            query: String(args.query ?? ""),
+            max: 200,
+          })
+        ).join("\n") || "совпадений нет";
+      case "open_path":
+        await invoke("open_path", { path: String(args.path ?? "") });
+        return "открыто";
+      case "screenshot":
+        return `скриншот сохранён: ${await invoke<string>("screenshot")}`;
+      case "http_get": {
+        const res = await fetch(String(args.url ?? ""));
+        const text = await res.text();
+        return `HTTP ${res.status}\n${text.slice(0, 12000)}`;
+      }
       default:
         return `неизвестный инструмент: ${name}`;
     }
