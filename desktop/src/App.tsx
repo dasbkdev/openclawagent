@@ -40,6 +40,7 @@ export function App() {
   const [agentMode, setAgentMode] = useState(false);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
+  const [autostart, setAutostart] = useState(false);
   const [approval, setApproval] = useState<{ summary: string; resolve: (ok: boolean) => void } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const approveAllRef = useRef(false);
@@ -56,6 +57,20 @@ export function App() {
   }, [activeId, conversations]);
 
   useEffect(() => saveConversations(conversations), [conversations]);
+
+  useEffect(() => {
+    void invoke<boolean>("get_autostart").then(setAutostart).catch(() => {});
+  }, []);
+
+  async function toggleAutostart() {
+    const next = !autostart;
+    try {
+      await invoke("set_autostart", { enabled: next });
+      setAutostart(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
@@ -291,13 +306,19 @@ export function App() {
           }),
       },
       {
+        id: "autostart",
+        label: autostart ? "Автозапуск с системой: выключить" : "Автозапуск с системой: включить",
+        hint: autostart ? "сейчас вкл" : "сейчас выкл",
+        run: () => void toggleAutostart(),
+      },
+      {
         id: "clear",
         label: "Очистить текущую беседу",
         run: () => active && patchActive((c) => ({ ...c, messages: [] })),
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [agentMode, settings, active],
+    [agentMode, settings, active, autostart],
   );
 
   return (
