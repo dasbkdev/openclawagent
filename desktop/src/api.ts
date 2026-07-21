@@ -147,15 +147,34 @@ export async function streamChat(
   messages: ChatMessage[],
   onDelta: (text: string) => void,
   signal?: AbortSignal,
+  images?: string[], // data URLs attached to the final user turn (OpenAI image_url parts)
 ): Promise<void> {
   const url = settings.endpoint.replace(/\/+$/, "") + "/v1/chat/completions";
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
 
+  // If images are present, promote the last user message to OpenAI multimodal content parts.
+  let outMessages: unknown[] = messages;
+  if (images && images.length) {
+    const lastUser = [...messages].map((m, i) => ({ m, i })).reverse().find((x) => x.m.role === "user");
+    outMessages = messages.map((m, i) => {
+      if (lastUser && i === lastUser.i) {
+        return {
+          role: m.role,
+          content: [
+            { type: "text", text: m.content },
+            ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+          ],
+        };
+      }
+      return m;
+    });
+  }
+
   const response = await fetch(url, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: settings.model, messages, stream: true }),
+    body: JSON.stringify({ model: settings.model, messages: outMessages, stream: true }),
     signal,
   });
 

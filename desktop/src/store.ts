@@ -3,7 +3,8 @@
 
 import type { ChatMessage } from "./api";
 
-export type StoredMessage = ChatMessage & { id: number };
+// `images` are data URLs (data:image/png;base64,…) attached to a user turn for vision.
+export type StoredMessage = ChatMessage & { id: number; images?: string[] };
 
 export type Conversation = {
   id: string;

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { CommandPalette, type Command } from "./CommandPalette";
 import {
   type AgentMessage,
   type BrainSettings,
@@ -20,7 +22,7 @@ import {
 import { Markdown } from "./Markdown";
 import { Terminal } from "./Terminal";
 import { runAgent } from "./agent";
-import { runAnthropicAgent, streamAnthropicChat } from "./anthropic";
+import { type ImageInput, runAnthropicAgent, streamAnthropicChat } from "./anthropic";
 
 export function App() {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
@@ -29,10 +31,12 @@ export function App() {
   });
   const [activeId, setActiveId] = useState<string>(() => "");
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<string[]>([]); // data URLs pending send
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
   const [agentMode, setAgentMode] = useState(false);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
@@ -40,6 +44,7 @@ export function App() {
   const abortRef = useRef<AbortController | null>(null);
   const approveAllRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? conversations[0],
@@ -61,6 +66,9 @@ export function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
         createConversation();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowPalette((s) => !s);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -85,16 +93,23 @@ export function App() {
 
   async function send() {
     const text = input.trim();
-    if (!text) return;
+    if (!text && attachments.length === 0) return;
+    const imgs = attachments;
     setInput("");
-    await sendText(text);
+    setAttachments([]);
+    await sendText(text, undefined, imgs);
   }
 
-  async function sendText(text: string, base?: StoredMessage[]) {
-    if (!text || busy || !active) return;
+  async function sendText(text: string, base?: StoredMessage[], images?: string[]) {
+    if ((!text && !(images && images.length)) || busy || !active) return;
     setError(null);
 
-    const userMsg: StoredMessage = { id: Date.now(), role: "user", content: text };
+    const userMsg: StoredMessage = {
+      id: Date.now(),
+      role: "user",
+      content: text,
+      ...(images && images.length ? { images } : {}),
+    };
     const assistantMsg: StoredMessage = { id: Date.now() + 1, role: "assistant", content: "" };
     const history = [...(base ?? active.messages), userMsg];
     patchActive((c) => ({
@@ -149,20 +164,21 @@ export function App() {
           onApprove,
           signal: controller.signal,
         };
-        if (settings.provider === "anthropic") await runAnthropicAgent(settings, agentHistory, cbs);
+        if (settings.provider === "anthropic")
+          await runAnthropicAgent(settings, agentHistory, cbs, toImageInputs(images));
         else await runAgent(settings, agentHistory, cbs);
       } else if (settings.provider === "anthropic") {
         const agentHistory: AgentMessage[] = [
           ...(system ? [{ role: "system" as const, content: system }] : []),
           ...history.map(({ role, content }) => ({ role, content })),
         ];
-        await streamAnthropicChat(settings, agentHistory, append, controller.signal);
+        await streamAnthropicChat(settings, agentHistory, append, controller.signal, toImageInputs(images));
       } else {
         const payload: ChatMessage[] = [
           ...(system ? [{ role: "system" as const, content: system }] : []),
           ...history.map(({ role, content }) => ({ role, content })),
         ];
-        await streamChat(settings, payload, append, controller.signal);
+        await streamChat(settings, payload, append, controller.signal, images);
       }
     } catch (e) {
       if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
@@ -215,8 +231,78 @@ export function App() {
     saveSettings(next);
   }
 
+  async function takeScreenshot() {
+    try {
+      const path = await invoke<string>("screenshot");
+      await invoke("open_path", { path });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function addFiles(files: FileList | File[]) {
+    const imgs = [...files].filter((f) => f.type.startsWith("image/"));
+    const urls = await Promise.all(
+      imgs.map(
+        (f) =>
+          new Promise<string>((resolve) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result));
+            r.readAsDataURL(f);
+          }),
+      ),
+    );
+    if (urls.length) setAttachments((prev) => [...prev, ...urls]);
+  }
+
+  function onPaste(e: React.ClipboardEvent) {
+    const files = [...e.clipboardData.items]
+      .filter((it) => it.kind === "file")
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => !!f);
+    if (files.length) {
+      e.preventDefault();
+      void addFiles(files);
+    }
+  }
+
+  const commands: Command[] = useMemo(
+    () => [
+      { id: "new", label: "Новая беседа", hint: "Ctrl+N", run: createConversation },
+      {
+        id: "agent",
+        label: agentMode ? "Выключить агента" : "Включить агента (инструменты)",
+        hint: "терминал, файлы, веб",
+        run: () => setAgentMode((a) => !a),
+      },
+      { id: "shot", label: "Скриншот экрана", hint: "сохранить и открыть PNG", run: () => void takeScreenshot() },
+      { id: "term", label: "Терминал", run: () => setShowTerminal((s) => !s) },
+      { id: "settings", label: "Настройки", hint: "провайдер, модель, ключ", run: () => setShowSettings(true) },
+      {
+        id: "provider",
+        label:
+          settings.provider === "anthropic"
+            ? "Провайдер → Мозг SAI (мост)"
+            : "Провайдер → Claude напрямую",
+        run: () =>
+          persistSettings({
+            ...settings,
+            provider: settings.provider === "anthropic" ? "bridge" : "anthropic",
+          }),
+      },
+      {
+        id: "clear",
+        label: "Очистить текущую беседу",
+        run: () => active && patchActive((c) => ({ ...c, messages: [] })),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [agentMode, settings, active],
+  );
+
   return (
     <div className="app">
+      <CommandPalette open={showPalette} commands={commands} onClose={() => setShowPalette(false)} />
       <aside className="sidebar">
         <button className="new-chat" onClick={createConversation}>
           ＋ Новая беседа
@@ -278,6 +364,13 @@ export function App() {
             return (
               <div key={m.id} className={`msg ${m.role}`}>
                 <div className="bubble">
+                  {m.images && m.images.length > 0 && (
+                    <div className="msg-images">
+                      {m.images.map((src, k) => (
+                        <img key={k} src={src} alt="вложение" className="msg-image" />
+                      ))}
+                    </div>
+                  )}
                   {m.role === "assistant" ? (
                     m.content ? (
                       <Markdown text={m.content} />
@@ -326,7 +419,31 @@ export function App() {
 
         {error && <div className="error">⚠ {error}</div>}
 
-        <div className="composer">
+        {attachments.length > 0 && (
+          <div className="attachments">
+            {attachments.map((src, k) => (
+              <div key={k} className="attachment">
+                <img src={src} alt="вложение" />
+                <button
+                  className="attachment-del"
+                  title="Убрать"
+                  onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== k))}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div
+          className="composer"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            void addFiles(e.dataTransfer.files);
+          }}
+        >
           <button
             className={`agent-toggle ${agentMode ? "on" : ""}`}
             title={agentMode ? "Агент включён: использует терминал и файлы" : "Включить агента (инструменты)"}
@@ -334,10 +451,29 @@ export function App() {
           >
             🛠
           </button>
+          <button
+            className="attach-btn"
+            title="Прикрепить изображение (или вставь/перетащи)"
+            onClick={() => fileRef.current?.click()}
+          >
+            📎
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              if (e.target.files) void addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
           <textarea
             value={input}
             placeholder="Сообщение…  (Enter — отправить, Shift+Enter — перенос)"
             onChange={(e) => setInput(e.target.value)}
+            onPaste={onPaste}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -359,6 +495,16 @@ export function App() {
       </main>
     </div>
   );
+}
+
+/** "data:image/png;base64,AAAA" -> { mediaType, dataB64 } for the Anthropic vision API. */
+function dataUrlToImageInput(url: string): ImageInput | null {
+  const m = /^data:([^;]+);base64,(.*)$/s.exec(url);
+  return m ? { mediaType: m[1], dataB64: m[2] } : null;
+}
+
+function toImageInputs(urls?: string[]): ImageInput[] {
+  return (urls ?? []).map(dataUrlToImageInput).filter((x): x is ImageInput => x !== null);
 }
 
 function SettingsPanel(props: {
