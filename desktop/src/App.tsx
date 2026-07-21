@@ -35,7 +35,9 @@ export function App() {
   const [agentMode, setAgentMode] = useState(false);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
+  const [approval, setApproval] = useState<{ summary: string; resolve: (ok: boolean) => void } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const approveAllRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const active = useMemo(
@@ -104,7 +106,24 @@ export function App() {
 
     const controller = new AbortController();
     abortRef.current = controller;
+    approveAllRef.current = false;
     const system = settings.systemPrompt.trim();
+
+    // Destructive tool calls pause here for user approval (unless "разрешить всё" was chosen).
+    const onApprove = (summary: string): Promise<boolean> =>
+      new Promise((resolve) => {
+        if (approveAllRef.current) {
+          resolve(true);
+          return;
+        }
+        setApproval({
+          summary,
+          resolve: (ok) => {
+            setApproval(null);
+            resolve(ok);
+          },
+        });
+      });
     const append = (delta: string) =>
       patchActive((c) => ({
         ...c,
@@ -123,11 +142,12 @@ export function App() {
           { role: "system", content: agentSystem },
           ...history.map(({ role, content }) => ({ role, content })),
         ];
-        await runAgent(
-          settings,
-          agentHistory,
-          { onText: append, onStep: (label) => append(`\n${label}\n`), signal: controller.signal },
-        );
+        await runAgent(settings, agentHistory, {
+          onText: append,
+          onStep: (label) => append(`\n${label}\n`),
+          onApprove,
+          signal: controller.signal,
+        });
       } else {
         const payload: ChatMessage[] = [
           ...(system ? [{ role: "system" as const, content: system }] : []),
@@ -145,6 +165,7 @@ export function App() {
 
   function stop() {
     abortRef.current?.abort();
+    approval?.resolve(false); // release any pending approval so the loop unwinds
     setBusy(false);
   }
 
@@ -270,6 +291,29 @@ export function App() {
         </div>
 
         {showTerminal && <Terminal onClose={() => setShowTerminal(false)} />}
+
+        {approval && (
+          <div className="approval-overlay">
+            <div className="approval">
+              <div className="approval-title">Агент просит разрешение</div>
+              <pre className="approval-body">{approval.summary}</pre>
+              <div className="approval-actions">
+                <button onClick={() => approval.resolve(false)}>Отклонить</button>
+                <button
+                  onClick={() => {
+                    approveAllRef.current = true;
+                    approval.resolve(true);
+                  }}
+                >
+                  Разрешить всё
+                </button>
+                <button className="primary" onClick={() => approval.resolve(true)}>
+                  Разрешить
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {error && <div className="error">⚠ {error}</div>}
 

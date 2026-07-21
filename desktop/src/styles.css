@@ -496,3 +496,57 @@ body,
   font: inherit;
   outline: none;
 }
+
+/* Destructive-tool approval gate */
+.approval-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.approval {
+  width: min(560px, 90%);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.approval-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.approval-body {
+  background: var(--panel-2);
+  border-radius: 6px;
+  padding: 10px;
+  margin: 0 0 12px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: var(--text);
+}
+.approval-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.approval-actions button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-2);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.approval-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0f1115;
+  font-weight: 600;
+}

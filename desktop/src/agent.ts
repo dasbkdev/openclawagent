@@ -63,6 +63,23 @@ export const TOOLS: ToolDef[] = [
 
 const MAX_STEPS = 8;
 
+// Tools that change the system need explicit user approval before they run.
+const DESTRUCTIVE = new Set(["run_command", "write_file"]);
+
+/** Human-readable one-liner describing what a destructive tool call will do. */
+function describeCall(name: string, args: Record<string, unknown>): string {
+  if (name === "run_command") {
+    const cwd = args.cwd ? ` (в ${String(args.cwd)})` : "";
+    return `Выполнить команду${cwd}:\n${String(args.cmd ?? "")}`;
+  }
+  if (name === "write_file") {
+    const content = String(args.content ?? "");
+    const preview = content.length > 400 ? content.slice(0, 400) + "…" : content;
+    return `Записать файл ${String(args.path ?? "")}:\n${preview}`;
+  }
+  return `${name}(${JSON.stringify(args)})`;
+}
+
 async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
   try {
     switch (name) {
@@ -94,6 +111,9 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 export type AgentCallbacks = {
   onText: (text: string) => void;
   onStep: (label: string) => void;
+  // Ask the user to approve a destructive tool call. Resolve true to run, false to skip.
+  // When omitted, destructive tools run without prompting (legacy behaviour).
+  onApprove?: (summary: string) => Promise<boolean>;
   signal?: AbortSignal;
 };
 
@@ -124,6 +144,18 @@ export async function runAgent(
         args = {};
       }
       cb.onStep(`🛠 ${call.function.name}(${short(call.function.arguments)})`);
+      if (DESTRUCTIVE.has(call.function.name) && cb.onApprove) {
+        const approved = await cb.onApprove(describeCall(call.function.name, args));
+        if (!approved) {
+          cb.onStep("↳ ⛔ отклонено пользователем");
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: "Пользователь отклонил выполнение этого действия.",
+          });
+          continue;
+        }
+      }
       const result = await executeTool(call.function.name, args);
       cb.onStep(`↳ ${short(result, 300)}`);
       messages.push({ role: "tool", tool_call_id: call.id, content: result });
