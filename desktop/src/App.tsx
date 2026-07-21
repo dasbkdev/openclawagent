@@ -334,6 +334,13 @@ export function App() {
         <header className="titlebar" data-tauri-drag-region>
           <span className="brand">✦ SAI</span>
           <span className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`} title={online ? "Мозг на связи" : "Нет связи с мозгом"} />
+          <button
+            className="provider-chip"
+            title="Провайдер и модель — нажми для настроек"
+            onClick={() => setShowSettings(true)}
+          >
+            {settings.provider === "anthropic" ? "Claude" : "Мозг"} · {settings.model}
+          </button>
           <div className="spacer" />
           <button
             className={`icon-btn ${showTerminal ? "active" : ""}`}
@@ -357,7 +364,15 @@ export function App() {
 
         <div className="messages" ref={listRef}>
           {(!active || active.messages.length === 0) && (
-            <div className="empty">Спроси что угодно — я подключён к твоему мозгу SAI.</div>
+            <div className="empty">
+              {settings.provider === "anthropic"
+                ? online
+                  ? "Спроси что угодно — говорю с Claude напрямую. 🛠 — агент, 📎 — картинки, Ctrl+K — команды."
+                  : "Открой ⚙ и вставь Anthropic API-ключ, чтобы начать."
+                : online
+                  ? "Спроси что угодно — подключён к мозгу nikolay_ai. 🛠 — агент, 📎 — картинки, Ctrl+K — команды."
+                  : "Нет связи с мозгом. Подними Tailscale и проверь адрес/токен в ⚙."}
+            </div>
           )}
           {active?.messages.map((m, i) => {
             const isLast = i === active.messages.length - 1;
