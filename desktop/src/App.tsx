@@ -15,6 +15,7 @@ import {
   IconSettings,
   IconSparkle,
   IconStop,
+  IconTasks,
   IconTrash,
   IconUser,
   IconWand,
@@ -25,9 +26,12 @@ import {
   ANTHROPIC_MODELS,
   type BrainSettings,
   type ChatMessage,
+  claimNextTask,
+  type DesktopTask,
   fetchModels,
   loadSettings,
   ping,
+  reportTaskResult,
   saveSettings,
   streamChat,
 } from "./api";
@@ -40,6 +44,7 @@ import {
   titleFrom,
 } from "./store";
 import { Markdown } from "./Markdown";
+import { TasksPanel } from "./Tasks";
 import { runAgent } from "./agent";
 import { type ImageInput, runAnthropicAgent, streamAnthropicChat } from "./anthropic";
 
@@ -57,6 +62,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [showTasks, setShowTasks] = useState(false);
+  const [queueOn, setQueueOn] = useState<boolean>(() => localStorage.getItem("sai.queue") === "1");
   const [agentMode, setAgentMode] = useState(false);
   const [openMenu, setOpenMenu] = useState<null | "model" | "provider">(null);
   const [models, setModels] = useState<string[]>(ANTHROPIC_MODELS);
@@ -66,6 +73,7 @@ export function App() {
   const [approval, setApproval] = useState<{ summary: string; resolve: (ok: boolean) => void } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const approveAllRef = useRef(false);
+  const queueBusyRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -173,6 +181,67 @@ export function App() {
     persistSettings({ ...settings, provider, model });
     setOpenMenu(null);
   }
+
+  function toggleQueue(on: boolean) {
+    setQueueOn(on);
+    localStorage.setItem("sai.queue", on ? "1" : "0");
+  }
+
+  // Execute one queued task headlessly (no user present → auto-approve tool calls).
+  async function runQueuedTask(task: DesktopTask): Promise<void> {
+    let out = "";
+    const cb = {
+      onText: (t: string) => {
+        out += t;
+      },
+      onStep: (l: string) => {
+        out += `\n${l}\n`;
+      },
+      onApprove: async () => true,
+    };
+    const sys = settings.systemPrompt.trim();
+    const history: AgentMessage[] = [
+      {
+        role: "system",
+        content:
+          (sys ? sys + "\n\n" : "") +
+          "Это фоновая задача из очереди — пользователя рядом нет. Выполни её полностью " +
+          "своими инструментами и в конце дай короткий отчёт о результате.",
+      },
+      { role: "user", content: task.instruction },
+    ];
+    try {
+      if (settings.provider === "anthropic") await runAnthropicAgent(settings, history, cb);
+      else await runAgent(settings, history, cb);
+      await reportTaskResult(settings, task.id, "done", out.trim() || "готово");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await reportTaskResult(settings, task.id, "failed", `${msg}\n${out}`.trim());
+    }
+  }
+
+  // Poll the brain queue and run due tasks one at a time (bridge provider only).
+  useEffect(() => {
+    if (!queueOn || settings.provider !== "bridge") return;
+    let alive = true;
+    const tick = async () => {
+      if (!alive || queueBusyRef.current || !online) return;
+      queueBusyRef.current = true;
+      try {
+        const task = await claimNextTask(settings);
+        if (task) await runQueuedTask(task);
+      } finally {
+        queueBusyRef.current = false;
+      }
+    };
+    void tick();
+    const i = setInterval(() => void tick(), 10000);
+    return () => {
+      alive = false;
+      clearInterval(i);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueOn, settings, online]);
 
   function patchActive(fn: (c: Conversation) => Conversation) {
     setConversations((prev) => prev.map((c) => (c.id === active?.id ? fn(c) : c)));
@@ -366,6 +435,7 @@ export function App() {
         run: () => setAgentMode((a) => !a),
       },
       { id: "shot", label: "Скриншот экрана", hint: "сохранить и открыть PNG", run: () => void takeScreenshot() },
+      { id: "tasks", label: "Задачи и очередь", hint: "фоновое выполнение", run: () => setShowTasks(true) },
       { id: "settings", label: "Настройки", hint: "провайдер, модель, ключ", run: () => setShowSettings(true) },
       {
         id: "provider",
@@ -398,6 +468,14 @@ export function App() {
   return (
     <div className="app">
       <CommandPalette open={showPalette} commands={commands} onClose={() => setShowPalette(false)} />
+      {showTasks && (
+        <TasksPanel
+          settings={settings}
+          queueOn={queueOn}
+          onToggleQueue={toggleQueue}
+          onClose={() => setShowTasks(false)}
+        />
+      )}
       <aside className="sidebar">
         <div className="side-brand">
           <span className="logo">
@@ -446,6 +524,13 @@ export function App() {
             <span className="cur">{active?.title ?? "Новая беседа"}</span>
           </div>
           <div className="spacer" />
+          <button
+            className={`icon-btn ${queueOn ? "active" : ""}`}
+            title="Задачи и очередь"
+            onClick={() => setShowTasks(true)}
+          >
+            <IconTasks />
+          </button>
           <button className="icon-btn" title="Настройки" onClick={() => setShowSettings((s) => !s)}>
             <IconSettings />
           </button>

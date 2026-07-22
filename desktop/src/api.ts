@@ -114,6 +114,79 @@ export async function chatWithTools(
   };
 }
 
+// ---- Desktop task queue (brain <-> SAI). Bridge provider only. ----
+export type DesktopTask = {
+  id: number;
+  source: string;
+  instruction: string;
+  status: string;
+  result: string;
+  origin_chat_id: string | null;
+  run_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+function taskUrl(settings: BrainSettings, path: string): string {
+  return settings.endpoint.replace(/\/+$/, "") + path;
+}
+function taskHeaders(settings: BrainSettings): Record<string, string> {
+  const h: Record<string, string> = { "Content-Type": "application/json" };
+  if (settings.apiKey) h.Authorization = `Bearer ${settings.apiKey}`;
+  return h;
+}
+
+/** Queue a new desktop task. */
+export async function createTask(
+  settings: BrainSettings,
+  instruction: string,
+  opts: { source?: string; runAt?: string } = {},
+): Promise<DesktopTask> {
+  const res = await fetch(taskUrl(settings, "/desktop/tasks"), {
+    method: "POST",
+    headers: taskHeaders(settings),
+    body: JSON.stringify({ instruction, source: opts.source ?? "sai", run_at: opts.runAt ?? null }),
+  });
+  if (!res.ok) throw new Error(`Очередь ответила ${res.status}`);
+  return res.json();
+}
+
+/** Atomically claim the next due task (or null). */
+export async function claimNextTask(settings: BrainSettings): Promise<DesktopTask | null> {
+  const res = await fetch(taskUrl(settings, "/desktop/tasks/next"), { headers: taskHeaders(settings) });
+  if (!res.ok) return null;
+  const json = await res.json().catch(() => null);
+  return json?.task ?? null;
+}
+
+/** Report a task's outcome. */
+export async function reportTaskResult(
+  settings: BrainSettings,
+  id: number,
+  status: "done" | "failed",
+  result: string,
+): Promise<void> {
+  await fetch(taskUrl(settings, `/desktop/tasks/${id}/result`), {
+    method: "POST",
+    headers: taskHeaders(settings),
+    body: JSON.stringify({ status, result: result.slice(0, 8000) }),
+  }).catch(() => {});
+}
+
+/** List recent tasks (for the UI). */
+export async function listTasks(settings: BrainSettings, limit = 50): Promise<DesktopTask[]> {
+  try {
+    const res = await fetch(taskUrl(settings, `/desktop/tasks?limit=${limit}`), {
+      headers: taskHeaders(settings),
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return Array.isArray(json?.tasks) ? json.tasks : [];
+  } catch {
+    return [];
+  }
+}
+
 /** List models available for the current provider. */
 export async function fetchModels(settings: BrainSettings): Promise<string[]> {
   if (settings.provider === "anthropic") return ANTHROPIC_MODELS;

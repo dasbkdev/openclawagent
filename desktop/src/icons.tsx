@@ -102,6 +102,12 @@ export const IconMaximize = ({ size = 13, className }: P) => (
   </svg>
 );
 
+export const IconTasks = ({ size = 18, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M4 6h1M4 12h1M4 18h1M9 6h11M9 12h11M9 18h11" />
+  </svg>
+);
+
 export const IconChevron = ({ size = 14, className }: P) => (
   <svg {...base(size)} className={className}>
     <path d="M6 9l6 6 6-6" />

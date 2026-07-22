@@ -1356,3 +1356,100 @@ button {
   font-size: 11.5px;
   font-weight: 600;
 }
+
+/* ---------------- tasks panel ---------------- */
+.tasks-modal {
+  width: min(620px, 94%);
+}
+.tasks-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+.task-add {
+  display: flex;
+  gap: 8px;
+}
+.task-add input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+  font: inherit;
+  outline: none;
+}
+.task-add input:focus {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow: auto;
+}
+.task-empty {
+  color: var(--faint);
+  text-align: center;
+  padding: 20px;
+}
+.task-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.task-badge {
+  flex: none;
+  align-self: flex-start;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.task-badge.running {
+  color: var(--blue);
+  border-color: rgba(76, 141, 255, 0.4);
+  background: rgba(76, 141, 255, 0.1);
+}
+.task-badge.done {
+  color: var(--green);
+  border-color: rgba(63, 185, 80, 0.4);
+  background: rgba(63, 185, 80, 0.1);
+}
+.task-badge.failed {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.task-main {
+  flex: 1;
+  min-width: 0;
+}
+.task-instr {
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+.task-result {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: auto;
+}
+.task-src {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--faint);
+}
