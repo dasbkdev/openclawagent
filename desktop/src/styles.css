@@ -364,6 +364,65 @@ button {
   border-color: var(--accent-line);
 }
 
+/* ---------------- control strip ---------------- */
+.controlstrip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--sidebar);
+}
+.ctrl-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  transition: border-color 0.14s, background 0.14s;
+}
+.ctrl-select:hover {
+  border-color: var(--border-strong);
+  background: var(--elev);
+}
+.ctrl-select .ctrl-label {
+  font-size: 11px;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ctrl-select .ctrl-value {
+  font-size: 12.5px;
+  font-weight: 550;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctrl-select svg {
+  color: var(--faint);
+}
+.controlstrip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.controlstrip .dot.on {
+  background: var(--green);
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.16);
+}
+.controlstrip .dot.off {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.controlstrip .dot.unknown {
+  background: var(--faint);
+}
+
 /* ---------------- messages ---------------- */
 .messages {
   flex: 1;

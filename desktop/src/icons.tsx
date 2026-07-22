@@ -90,6 +90,12 @@ export const IconCopy = ({ size = 15, className }: P) => (
   </svg>
 );
 
+export const IconChevron = ({ size = 14, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+);
+
 export const IconUser = ({ size = 15, className }: P) => (
   <svg {...base(size)} className={className}>
     <circle cx="12" cy="8" r="4" />

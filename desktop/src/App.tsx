@@ -9,6 +9,7 @@ import {
   IconRefresh,
   IconSend,
   IconSettings,
+  IconChevron,
   IconSparkle,
   IconStop,
   IconTerminal,
@@ -426,6 +427,24 @@ export function App() {
             <IconSettings />
           </button>
         </header>
+
+        <div className="controlstrip">
+          <button className="ctrl-select" onClick={() => setShowSettings(true)} title="Сменить модель">
+            <span className="ctrl-label">Модель</span>
+            <span className="ctrl-value">{settings.model}</span>
+            <IconChevron size={13} />
+          </button>
+          <button className="ctrl-select" onClick={() => setShowSettings(true)} title="Сменить провайдера">
+            <span className="ctrl-label">Провайдер</span>
+            <span className="ctrl-value">{settings.provider === "anthropic" ? "Claude напрямую" : "Мозг SAI"}</span>
+            <IconChevron size={13} />
+          </button>
+          <div className="spacer" />
+          <span
+            className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`}
+            title={online === null ? "Проверка связи" : online ? "Мозг на связи" : "Нет связи с мозгом"}
+          />
+        </div>
 
         {showSettings && (
           <div className="modal-overlay" onClick={() => setShowSettings(false)}>
