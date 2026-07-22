@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { homeDir, join } from "@tauri-apps/api/path";
 import { CommandPalette, type Command } from "./CommandPalette";
 import {
   IconCopy,
@@ -74,6 +75,23 @@ export function App() {
 
   useEffect(() => {
     void invoke<boolean>("get_autostart").then(setAutostart).catch(() => {});
+  }, []);
+
+  // Provisioning: if ~/.sai-bootstrap.json exists, merge it into settings once (lets the
+  // brain endpoint/token/model be configured for the user without touching the UI).
+  useEffect(() => {
+    void (async () => {
+      try {
+        const path = await join(await homeDir(), ".sai-bootstrap.json");
+        const raw = await invoke<string>("read_file", { path });
+        const cfg = JSON.parse(raw) as Partial<BrainSettings>;
+        const next = { ...loadSettings(), ...cfg };
+        saveSettings(next);
+        setSettings(next);
+      } catch {
+        // no bootstrap file — normal
+      }
+    })();
   }, []);
 
   async function toggleAutostart() {
