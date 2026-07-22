@@ -150,6 +150,19 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.provider, settings.endpoint, settings.apiKey]);
 
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const apply = () => {
+      const eff = settings.theme === "system" ? (mq.matches ? "light" : "dark") : settings.theme;
+      document.documentElement.dataset.theme = eff;
+    };
+    apply();
+    if (settings.theme === "system") {
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    }
+  }, [settings.theme]);
+
   function chooseModel(model: string) {
     persistSettings({ ...settings, model });
     setOpenMenu(null);
@@ -199,10 +212,11 @@ export function App() {
     approveAllRef.current = false;
     const system = settings.systemPrompt.trim();
 
-    // Destructive tool calls pause here for user approval (unless "разрешить всё" was chosen).
+    // Destructive tool calls pause here for user approval (unless "разрешить всё" was chosen
+    // or danger mode is on — then they run unconditionally).
     const onApprove = (summary: string): Promise<boolean> =>
       new Promise((resolve) => {
-        if (approveAllRef.current) {
+        if (settings.dangerMode || approveAllRef.current) {
           resolve(true);
           return;
         }
@@ -500,6 +514,11 @@ export function App() {
             )}
           </div>
           <div className="spacer" />
+          {settings.dangerMode && (
+            <span className="danger-flag" title="Разрешения отключены — асик действует без подтверждений">
+              без ограничений
+            </span>
+          )}
           <span
             className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`}
             title={online === null ? "Проверка связи" : online ? "Мозг на связи" : "Нет связи с мозгом"}
@@ -737,6 +756,7 @@ function SettingsPanel(props: {
 }) {
   const [draft, setDraft] = useState(props.settings);
   const [models, setModels] = useState<string[]>([]);
+  const [warnDanger, setWarnDanger] = useState(false);
 
   useEffect(() => {
     void fetchModels(draft).then(setModels);
@@ -798,6 +818,62 @@ function SettingsPanel(props: {
           onChange={(e) => setDraft({ ...draft, systemPrompt: e.target.value })}
         />
       </label>
+      <label>
+        Тема
+        <select
+          value={draft.theme}
+          onChange={(e) => setDraft({ ...draft, theme: e.target.value as BrainSettings["theme"] })}
+        >
+          <option value="dark">Тёмная</option>
+          <option value="light">Светлая</option>
+          <option value="system">Как в системе</option>
+        </select>
+      </label>
+
+      <div className="danger-row">
+        <div className="danger-text">
+          <div className="danger-title">Не спрашивать разрешений</div>
+          <div className="danger-desc">Асик выполняет любые действия без подтверждения.</div>
+        </div>
+        <button
+          className={`switch ${draft.dangerMode ? "on" : ""}`}
+          role="switch"
+          aria-checked={draft.dangerMode}
+          onClick={() => (draft.dangerMode ? setDraft({ ...draft, dangerMode: false }) : setWarnDanger(true))}
+        >
+          <span className="knob" />
+        </button>
+      </div>
+
+      {warnDanger && (
+        <div className="danger-overlay" onClick={() => setWarnDanger(false)}>
+          <div className="danger-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="danger-h">⚠ Режим без ограничений</div>
+            <p className="danger-body">
+              Асик сможет делать на компьютере <b>что угодно без подтверждения</b>: удалять и
+              перезаписывать файлы, выполнять любые команды, управлять мышью и клавиатурой,
+              закрывать приложения. Есть <b>реальный риск потери важных данных</b>.
+              <br />
+              <br />
+              Включай только если полностью доверяешь и понимаешь последствия. Разработчики
+              <b> не несут ответственности</b>, если асик сотрёт или испортит данные.
+            </p>
+            <div className="danger-actions">
+              <button onClick={() => setWarnDanger(false)}>Отмена</button>
+              <button
+                className="danger-confirm"
+                onClick={() => {
+                  setDraft({ ...draft, dangerMode: true });
+                  setWarnDanger(false);
+                }}
+              >
+                Понимаю риск — включить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="settings-actions">
         <button onClick={props.onClose}>Отмена</button>
         <button

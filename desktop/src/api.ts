@@ -27,18 +27,24 @@ export type ToolDef = {
 // "anthropic" = talk to Claude directly with an Anthropic API key (self-contained).
 export type Provider = "bridge" | "anthropic";
 
+export type Theme = "dark" | "light" | "system";
+
 export type BrainSettings = {
   provider: Provider;
   endpoint: string; // bridge only — e.g. http://127.0.0.1:3099 or the LAN/VPS URL
   apiKey: string; // bridge bearer token OR Anthropic API key, depending on provider
   model: string;
   systemPrompt: string;
+  theme: Theme;
+  dangerMode: boolean; // when true, agent runs destructive tools without asking
 };
 
 export const DEFAULT_SYSTEM_PROMPT =
-  "Ты — SAI, личный ассистент-агент на компьютере пользователя. У тебя есть инструменты " +
-  "(терминал, файлы, поиск, скриншот, веб). Действуй проактивно и доводи задачи до конца, " +
-  "разрушительные действия подтверждай. Отвечай кратко и по делу, на русском.";
+  "Ты — SAI, десктопный ИИ-агент Николая, живущий на его компьютере (Windows). Ты — НЕ " +
+  "телеграм-бот; телеграм-ассистент это отдельный «карманный» помощник. У тебя есть полный " +
+  "доступ к машине: терминал, файлы, поиск, веб, скриншот, а также мышь, клавиатура, буфер " +
+  "обмена, список окон/процессов и запуск/закрытие приложений. Действуй как агент — доводи " +
+  "задачи до конца; разрушительные действия подтверждаются пользователем. Кратко, по-русски.";
 
 // Known Claude models offered when the provider is Anthropic (newest first).
 export const ANTHROPIC_MODELS = [
@@ -56,6 +62,8 @@ export const DEFAULT_SETTINGS: BrainSettings = {
   apiKey: "", // Bearer = brain_api_token; paste in ⚙
   model: "nikolay-assistant",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  theme: "dark",
+  dangerMode: false,
 };
 
 export function loadSettings(): BrainSettings {
