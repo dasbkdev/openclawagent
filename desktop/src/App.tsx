@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir, join } from "@tauri-apps/api/path";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { CommandPalette, type Command } from "./CommandPalette";
 import {
+  IconChevron,
   IconCopy,
+  IconMaximize,
+  IconMinimize,
   IconPaperclip,
   IconPlus,
   IconRefresh,
   IconSend,
   IconSettings,
-  IconChevron,
   IconSparkle,
   IconStop,
-  IconTerminal,
   IconTrash,
   IconUser,
   IconWand,
@@ -20,6 +22,7 @@ import {
 } from "./icons";
 import {
   type AgentMessage,
+  ANTHROPIC_MODELS,
   type BrainSettings,
   type ChatMessage,
   fetchModels,
@@ -37,9 +40,10 @@ import {
   titleFrom,
 } from "./store";
 import { Markdown } from "./Markdown";
-import { Terminal } from "./Terminal";
 import { runAgent } from "./agent";
 import { type ImageInput, runAnthropicAgent, streamAnthropicChat } from "./anthropic";
+
+const appWindow = getCurrentWindow();
 
 export function App() {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
@@ -52,9 +56,10 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [showTerminal, setShowTerminal] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [agentMode, setAgentMode] = useState(false);
+  const [openMenu, setOpenMenu] = useState<null | "model" | "provider">(null);
+  const [models, setModels] = useState<string[]>(ANTHROPIC_MODELS);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
   const [autostart, setAutostart] = useState(false);
@@ -135,6 +140,26 @@ export function App() {
       clearInterval(t);
     };
   }, [settings]);
+
+  useEffect(() => {
+    let alive = true;
+    void fetchModels(settings).then((m) => alive && m.length && setModels(m));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.provider, settings.endpoint, settings.apiKey]);
+
+  function chooseModel(model: string) {
+    persistSettings({ ...settings, model });
+    setOpenMenu(null);
+  }
+
+  function chooseProvider(provider: BrainSettings["provider"]) {
+    const model = provider === "anthropic" ? "claude-opus-4-8" : "nikolay-assistant";
+    persistSettings({ ...settings, provider, model });
+    setOpenMenu(null);
+  }
 
   function patchActive(fn: (c: Conversation) => Conversation) {
     setConversations((prev) => prev.map((c) => (c.id === active?.id ? fn(c) : c)));
@@ -327,7 +352,6 @@ export function App() {
         run: () => setAgentMode((a) => !a),
       },
       { id: "shot", label: "Скриншот экрана", hint: "сохранить и открыть PNG", run: () => void takeScreenshot() },
-      { id: "term", label: "Терминал", run: () => setShowTerminal((s) => !s) },
       { id: "settings", label: "Настройки", hint: "провайдер, модель, ключ", run: () => setShowSettings(true) },
       {
         id: "provider",
@@ -365,10 +389,7 @@ export function App() {
           <span className="logo">
             <IconSparkle size={18} />
           </span>
-          <span className="titles">
-            <span className="kicker">Personal Agent</span>
-            <span className="name">SAI</span>
-          </span>
+          <span className="name">SAI</span>
         </div>
         <button className="new-chat" onClick={createConversation}>
           <IconPlus size={16} /> Новая беседа
@@ -399,11 +420,6 @@ export function App() {
             </div>
           ))}
         </div>
-        <button className="side-foot" onClick={() => setShowSettings(true)} title="Настройки">
-          <span className={`fdot ${online === null ? "unknown" : online ? "on" : "off"}`} />
-          <span className="foot-model">{settings.model}</span>
-          <IconSettings size={15} />
-        </button>
       </aside>
 
       <main className="main">
@@ -416,29 +432,73 @@ export function App() {
             <span className="cur">{active?.title ?? "Новая беседа"}</span>
           </div>
           <div className="spacer" />
-          <button
-            className={`icon-btn ${showTerminal ? "active" : ""}`}
-            title="Терминал"
-            onClick={() => setShowTerminal((s) => !s)}
-          >
-            <IconTerminal />
-          </button>
           <button className="icon-btn" title="Настройки" onClick={() => setShowSettings((s) => !s)}>
             <IconSettings />
           </button>
+          <div className="win-controls">
+            <button className="win-btn" title="Свернуть" onClick={() => void appWindow.minimize()}>
+              <IconMinimize />
+            </button>
+            <button className="win-btn" title="Развернуть" onClick={() => void appWindow.toggleMaximize()}>
+              <IconMaximize />
+            </button>
+            <button className="win-btn close" title="Закрыть" onClick={() => void appWindow.close()}>
+              <IconX size={15} />
+            </button>
+          </div>
         </header>
 
         <div className="controlstrip">
-          <button className="ctrl-select" onClick={() => setShowSettings(true)} title="Сменить модель">
-            <span className="ctrl-label">Модель</span>
-            <span className="ctrl-value">{settings.model}</span>
-            <IconChevron size={13} />
-          </button>
-          <button className="ctrl-select" onClick={() => setShowSettings(true)} title="Сменить провайдера">
-            <span className="ctrl-label">Провайдер</span>
-            <span className="ctrl-value">{settings.provider === "anthropic" ? "Claude напрямую" : "Мозг SAI"}</span>
-            <IconChevron size={13} />
-          </button>
+          {openMenu && <div className="menu-backdrop" onClick={() => setOpenMenu(null)} />}
+          <div className="ctrl-wrap">
+            <button
+              className={`ctrl-select ${openMenu === "model" ? "open" : ""}`}
+              onClick={() => setOpenMenu((m) => (m === "model" ? null : "model"))}
+            >
+              <span className="ctrl-label">Модель</span>
+              <span className="ctrl-value">{settings.model}</span>
+              <IconChevron size={13} />
+            </button>
+            {openMenu === "model" && (
+              <div className="ctrl-menu">
+                {models.map((m) => (
+                  <button
+                    key={m}
+                    className={`ctrl-opt ${m === settings.model ? "sel" : ""}`}
+                    onClick={() => chooseModel(m)}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="ctrl-wrap">
+            <button
+              className={`ctrl-select ${openMenu === "provider" ? "open" : ""}`}
+              onClick={() => setOpenMenu((m) => (m === "provider" ? null : "provider"))}
+            >
+              <span className="ctrl-label">Провайдер</span>
+              <span className="ctrl-value">{settings.provider === "anthropic" ? "Claude напрямую" : "Мозг SAI"}</span>
+              <IconChevron size={13} />
+            </button>
+            {openMenu === "provider" && (
+              <div className="ctrl-menu">
+                <button
+                  className={`ctrl-opt ${settings.provider === "bridge" ? "sel" : ""}`}
+                  onClick={() => chooseProvider("bridge")}
+                >
+                  Мозг SAI (мост)
+                </button>
+                <button
+                  className={`ctrl-opt ${settings.provider === "anthropic" ? "sel" : ""}`}
+                  onClick={() => chooseProvider("anthropic")}
+                >
+                  Claude напрямую
+                </button>
+              </div>
+            )}
+          </div>
           <div className="spacer" />
           <span
             className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`}
@@ -537,8 +597,6 @@ export function App() {
           })}
         </div>
 
-        {showTerminal && <Terminal onClose={() => setShowTerminal(false)} />}
-
         {approval && (
           <div className="approval-overlay">
             <div className="approval">
@@ -591,7 +649,7 @@ export function App() {
         >
           <textarea
             value={input}
-            placeholder={`Сообщение ${settings.provider === "anthropic" ? "Claude" : "SAI"}…  (Enter — отправить)`}
+            placeholder="Сообщение SAI…"
             onChange={(e) => setInput(e.target.value)}
             onPaste={onPaste}
             onKeyDown={(e) => {

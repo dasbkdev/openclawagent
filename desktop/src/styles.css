@@ -364,6 +364,32 @@ button {
   border-color: var(--accent-line);
 }
 
+/* custom window controls (frameless window) */
+.win-controls {
+  display: flex;
+  gap: 2px;
+  margin-left: 6px;
+}
+.win-btn {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--muted);
+  transition: background 0.13s, color 0.13s;
+}
+.win-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.win-btn.close:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
 /* ---------------- control strip ---------------- */
 .controlstrip {
   display: flex;
@@ -423,19 +449,73 @@ button {
   background: var(--faint);
 }
 
+.ctrl-wrap {
+  position: relative;
+}
+.ctrl-select.open {
+  border-color: var(--accent-line);
+  background: var(--elev);
+}
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 18;
+}
+.ctrl-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 230px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 5px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lg);
+  animation: pop 0.14s var(--ease);
+}
+.ctrl-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.ctrl-opt:hover {
+  background: var(--hover);
+}
+.ctrl-opt.sel {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 /* ---------------- messages ---------------- */
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 22px 8%;
+  padding: 26px 20px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  align-items: center;
+  gap: 20px;
 }
-@media (max-width: 900px) {
-  .messages {
-    padding: 20px 16px;
-  }
+/* content column — adapts to any window width */
+.msg,
+.composer,
+.attachments,
+.error {
+  width: 100%;
+  max-width: 840px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .empty {
@@ -600,7 +680,7 @@ button {
 }
 
 .error {
-  margin: 0 8% 8px;
+  margin: 0 auto 8px;
   padding: 9px 13px;
   color: #ffb4b6;
   background: var(--accent-soft);
@@ -614,7 +694,7 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 8% 0;
+  padding: 10px 2px 0;
 }
 .attachment {
   position: relative;
@@ -641,7 +721,7 @@ button {
 }
 
 .composer {
-  margin: 10px 8% 16px;
+  margin: 10px auto 18px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);

@@ -90,6 +90,18 @@ export const IconCopy = ({ size = 15, className }: P) => (
   </svg>
 );
 
+export const IconMinimize = ({ size = 14, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M5 12h14" />
+  </svg>
+);
+
+export const IconMaximize = ({ size = 13, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <rect x="5" y="5" width="14" height="14" rx="2" />
+  </svg>
+);
+
 export const IconChevron = ({ size = 14, className }: P) => (
   <svg {...base(size)} className={className}>
     <path d="M6 9l6 6 6-6" />
