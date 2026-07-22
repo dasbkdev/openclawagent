@@ -139,12 +139,153 @@ export const TOOLS: ToolDef[] = [
       },
     },
   },
+  // --- computer-use: the agent's hands on the machine ---
+  {
+    type: "function",
+    function: {
+      name: "type_text",
+      description: "Напечатать текст как с клавиатуры в активное окно/поле.",
+      parameters: {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "key_combo",
+      description: "Нажать сочетание клавиш, например [\"ctrl\",\"c\"], [\"alt\",\"tab\"], [\"win\",\"d\"], [\"enter\"].",
+      parameters: {
+        type: "object",
+        properties: { keys: { type: "array", items: { type: "string" } } },
+        required: ["keys"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "mouse_move",
+      description: "Переместить курсор в абсолютные координаты экрана.",
+      parameters: {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "mouse_click",
+      description: "Клик мышью в (x,y) или по текущей позиции. button: left|right|middle.",
+      parameters: {
+        type: "object",
+        properties: {
+          x: { type: "number" },
+          y: { type: "number" },
+          button: { type: "string", enum: ["left", "right", "middle"] },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "mouse_scroll",
+      description: "Прокрутка колесом: положительное — вниз, отрицательное — вверх.",
+      parameters: {
+        type: "object",
+        properties: { amount: { type: "number" } },
+        required: ["amount"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "clipboard_get",
+      description: "Прочитать текст из буфера обмена.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "clipboard_set",
+      description: "Положить текст в буфер обмена.",
+      parameters: {
+        type: "object",
+        properties: { text: { type: "string" } },
+        required: ["text"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_processes",
+      description: "Список запущенных процессов.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_windows",
+      description: "Список открытых окон с заголовками.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "active_window",
+      description: "Активное (сфокусированное) окно: приложение и заголовок.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "open_app",
+      description: "Запустить приложение по имени или пути (например notepad, chrome).",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "close_app",
+      description: "Принудительно закрыть приложение по имени процесса (например notepad.exe).",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      },
+    },
+  },
 ];
 
 const MAX_STEPS = 8;
 
 // Tools that change the system need explicit user approval before they run.
-export const DESTRUCTIVE = new Set(["run_command", "write_file", "edit_file"]);
+export const DESTRUCTIVE = new Set([
+  "run_command",
+  "write_file",
+  "edit_file",
+  "type_text",
+  "key_combo",
+  "mouse_click",
+  "open_app",
+  "close_app",
+]);
 
 /** Human-readable one-liner describing what a destructive tool call will do. */
 export function describeCall(name: string, args: Record<string, unknown>): string {
@@ -160,6 +301,14 @@ export function describeCall(name: string, args: Record<string, unknown>): strin
   if (name === "edit_file") {
     return `Изменить файл ${String(args.path ?? "")}:\n- ${String(args.old ?? "")}\n+ ${String(args.new ?? "")}`;
   }
+  if (name === "type_text") return `Напечатать текст:\n${String(args.text ?? "")}`;
+  if (name === "key_combo") return `Нажать клавиши: ${(Array.isArray(args.keys) ? args.keys : []).join(" + ")}`;
+  if (name === "mouse_click") {
+    const at = args.x != null && args.y != null ? ` в (${args.x}, ${args.y})` : " по текущей позиции";
+    return `Клик мышью (${String(args.button ?? "left")})${at}`;
+  }
+  if (name === "open_app") return `Запустить приложение: ${String(args.name ?? "")}`;
+  if (name === "close_app") return `Принудительно закрыть: ${String(args.name ?? "")}`;
   return `${name}(${JSON.stringify(args)})`;
 }
 
@@ -215,6 +364,42 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
         const text = await res.text();
         return `HTTP ${res.status}\n${text.slice(0, 12000)}`;
       }
+      case "type_text":
+        await invoke("type_text", { text: String(args.text ?? "") });
+        return "напечатано";
+      case "key_combo":
+        await invoke("key_combo", { keys: Array.isArray(args.keys) ? args.keys.map(String) : [] });
+        return "нажато";
+      case "mouse_move":
+        await invoke("mouse_move", { x: Number(args.x), y: Number(args.y) });
+        return "курсор перемещён";
+      case "mouse_click":
+        await invoke("mouse_click", {
+          x: args.x != null ? Number(args.x) : null,
+          y: args.y != null ? Number(args.y) : null,
+          button: args.button ? String(args.button) : null,
+        });
+        return "клик";
+      case "mouse_scroll":
+        await invoke("mouse_scroll", { amount: Number(args.amount ?? 0) });
+        return "прокручено";
+      case "clipboard_get":
+        return (await invoke<string>("clipboard_get")).slice(0, 12000) || "(буфер пуст)";
+      case "clipboard_set":
+        await invoke("clipboard_set", { text: String(args.text ?? "") });
+        return "в буфере";
+      case "list_processes":
+        return (await invoke<string>("list_processes")).slice(0, 8000);
+      case "list_windows":
+        return (await invoke<string>("list_windows")).slice(0, 8000) || "нет окон с заголовками";
+      case "active_window":
+        return (await invoke<string>("active_window")) || "не определено";
+      case "open_app":
+        await invoke("open_app", { name: String(args.name ?? "") });
+        return "запущено";
+      case "close_app":
+        await invoke("close_app", { name: String(args.name ?? "") });
+        return "закрыто";
       default:
         return `неизвестный инструмент: ${name}`;
     }

@@ -233,6 +233,220 @@ fn screenshot() -> Result<String, String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Computer-use — the agent's "hands" on the machine (parity with OpenClaw's
+// device agent): keyboard, mouse, clipboard, window/process inspection, apps.
+// The destructive ones are behind the UI confirm-gate.
+// ---------------------------------------------------------------------------
+
+use enigo::{
+    Axis, Button,
+    Coordinate::Abs,
+    Direction::{Click, Press, Release},
+    Enigo, Key, Keyboard, Mouse, Settings,
+};
+
+fn new_enigo() -> Result<Enigo, String> {
+    Enigo::new(&Settings::default()).map_err(|e| e.to_string())
+}
+
+fn parse_key(s: &str) -> Option<Key> {
+    let k = s.to_lowercase();
+    Some(match k.as_str() {
+        "ctrl" | "control" => Key::Control,
+        "alt" | "option" => Key::Alt,
+        "shift" => Key::Shift,
+        "win" | "super" | "meta" | "cmd" | "command" => Key::Meta,
+        "enter" | "return" => Key::Return,
+        "tab" => Key::Tab,
+        "esc" | "escape" => Key::Escape,
+        "space" => Key::Space,
+        "backspace" => Key::Backspace,
+        "delete" | "del" => Key::Delete,
+        "up" => Key::UpArrow,
+        "down" => Key::DownArrow,
+        "left" => Key::LeftArrow,
+        "right" => Key::RightArrow,
+        "home" => Key::Home,
+        "end" => Key::End,
+        "pageup" => Key::PageUp,
+        "pagedown" => Key::PageDown,
+        "f1" => Key::F1,
+        "f2" => Key::F2,
+        "f3" => Key::F3,
+        "f4" => Key::F4,
+        "f5" => Key::F5,
+        "f6" => Key::F6,
+        "f7" => Key::F7,
+        "f8" => Key::F8,
+        "f9" => Key::F9,
+        "f10" => Key::F10,
+        "f11" => Key::F11,
+        "f12" => Key::F12,
+        _ if k.chars().count() == 1 => Key::Unicode(k.chars().next().unwrap()),
+        _ => return None,
+    })
+}
+
+fn is_modifier(s: &str) -> bool {
+    matches!(
+        s.to_lowercase().as_str(),
+        "ctrl" | "control" | "alt" | "option" | "shift" | "win" | "super" | "meta" | "cmd" | "command"
+    )
+}
+
+// Type a string of text at the current focus (as if typed on the keyboard).
+#[tauri::command]
+fn type_text(text: String) -> Result<(), String> {
+    new_enigo()?.text(&text).map_err(|e| e.to_string())
+}
+
+// Press a key combination, e.g. ["ctrl","c"] or ["alt","tab"] or ["win","d"].
+#[tauri::command]
+fn key_combo(keys: Vec<String>) -> Result<(), String> {
+    let mut e = new_enigo()?;
+    let mods: Vec<&String> = keys.iter().filter(|k| is_modifier(k)).collect();
+    let main: Vec<&String> = keys.iter().filter(|k| !is_modifier(k)).collect();
+    for m in &mods {
+        if let Some(k) = parse_key(m) {
+            e.key(k, Press).map_err(|x| x.to_string())?;
+        }
+    }
+    for k in &main {
+        if let Some(key) = parse_key(k) {
+            e.key(key, Click).map_err(|x| x.to_string())?;
+        }
+    }
+    for m in mods.iter().rev() {
+        if let Some(k) = parse_key(m) {
+            e.key(k, Release).map_err(|x| x.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+// Move the mouse to absolute screen coordinates.
+#[tauri::command]
+fn mouse_move(x: i32, y: i32) -> Result<(), String> {
+    new_enigo()?.move_mouse(x, y, Abs).map_err(|e| e.to_string())
+}
+
+// Click at (x,y) if given (else at the current position). button: left|right|middle.
+#[tauri::command]
+fn mouse_click(x: Option<i32>, y: Option<i32>, button: Option<String>) -> Result<(), String> {
+    let mut e = new_enigo()?;
+    if let (Some(x), Some(y)) = (x, y) {
+        e.move_mouse(x, y, Abs).map_err(|s| s.to_string())?;
+    }
+    let b = match button.as_deref() {
+        Some("right") => Button::Right,
+        Some("middle") => Button::Middle,
+        _ => Button::Left,
+    };
+    e.button(b, Click).map_err(|s| s.to_string())
+}
+
+// Scroll vertically: positive = down, negative = up (in wheel steps).
+#[tauri::command]
+fn mouse_scroll(amount: i32) -> Result<(), String> {
+    new_enigo()?.scroll(amount, Axis::Vertical).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clipboard_get() -> Result<String, String> {
+    arboard::Clipboard::new()
+        .and_then(|mut c| c.get_text())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clipboard_set(text: String) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut c| c.set_text(text))
+        .map_err(|e| e.to_string())
+}
+
+// Running processes (names). Windows: tasklist; unix: ps.
+#[tauri::command]
+fn list_processes() -> Result<String, String> {
+    let out = if cfg!(target_os = "windows") {
+        Command::new("tasklist").arg("/FO").arg("CSV").arg("/NH").output()
+    } else {
+        Command::new("ps").arg("-eo").arg("comm").output()
+    };
+    out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .map_err(|e| e.to_string())
+}
+
+// Visible top-level windows with titles (best-effort, per OS).
+#[tauri::command]
+fn list_windows() -> Result<String, String> {
+    let out = if cfg!(target_os = "windows") {
+        Command::new("powershell.exe").args([
+            "-NoProfile",
+            "-Command",
+            "Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { \"$($_.ProcessName): $($_.MainWindowTitle)\" }",
+        ]).output()
+    } else if cfg!(target_os = "macos") {
+        Command::new("osascript").args([
+            "-e",
+            "tell application \"System Events\" to get name of (processes where background only is false)",
+        ]).output()
+    } else {
+        Command::new("wmctrl").arg("-l").output()
+    };
+    out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .map_err(|e| e.to_string())
+}
+
+// The currently focused window ("<app>: <title>").
+#[tauri::command]
+fn active_window() -> Result<String, String> {
+    let out = if cfg!(target_os = "windows") {
+        Command::new("powershell.exe").args([
+            "-NoProfile",
+            "-Command",
+            "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);' -Name U -Namespace W -PassThru | Out-Null; $h=[W.U]::GetForegroundWindow(); $p=0; [W.U]::GetWindowThreadProcessId($h,[ref]$p) | Out-Null; $proc=Get-Process -Id $p; \"$($proc.ProcessName): $($proc.MainWindowTitle)\"",
+        ]).output()
+    } else if cfg!(target_os = "macos") {
+        Command::new("osascript").args([
+            "-e",
+            "tell application \"System Events\" to get name of first process whose frontmost is true",
+        ]).output()
+    } else {
+        Command::new("xdotool").args(["getactivewindow", "getwindowname"]).output()
+    };
+    out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .map_err(|e| e.to_string())
+}
+
+// Launch an application by name or path.
+#[tauri::command]
+fn open_app(name: String) -> Result<(), String> {
+    let r = if cfg!(target_os = "windows") {
+        Command::new("cmd").args(["/C", "start", "", &name]).spawn()
+    } else if cfg!(target_os = "macos") {
+        Command::new("open").arg("-a").arg(&name).spawn()
+    } else {
+        Command::new(&name).spawn()
+    };
+    r.map(|_| ()).map_err(|e| e.to_string())
+}
+
+// Force-close an application by executable/process name.
+#[tauri::command]
+fn close_app(name: String) -> Result<(), String> {
+    let r = if cfg!(target_os = "windows") {
+        Command::new("taskkill").args(["/IM", &name, "/F"]).output()
+    } else {
+        Command::new("pkill").arg("-f").arg(&name).output()
+    };
+    r.map(|o| {
+        let _ = o;
+    })
+    .map_err(|e| e.to_string())
+}
+
 // Launch SAI on system login (tray + global hotkey make it an always-available assistant).
 #[tauri::command]
 fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
@@ -267,6 +481,18 @@ pub fn run() {
             search_files,
             open_path,
             screenshot,
+            type_text,
+            key_combo,
+            mouse_move,
+            mouse_click,
+            mouse_scroll,
+            clipboard_get,
+            clipboard_set,
+            list_processes,
+            list_windows,
+            active_window,
+            open_app,
+            close_app,
             set_autostart,
             get_autostart
         ])
