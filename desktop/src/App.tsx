@@ -13,6 +13,7 @@ import {
   IconStop,
   IconTerminal,
   IconTrash,
+  IconUser,
   IconWand,
   IconX,
 } from "./icons";
@@ -359,9 +360,19 @@ export function App() {
     <div className="app">
       <CommandPalette open={showPalette} commands={commands} onClose={() => setShowPalette(false)} />
       <aside className="sidebar">
+        <div className="side-brand">
+          <span className="logo">
+            <IconSparkle size={18} />
+          </span>
+          <span className="titles">
+            <span className="kicker">Personal Agent</span>
+            <span className="name">SAI</span>
+          </span>
+        </div>
         <button className="new-chat" onClick={createConversation}>
           <IconPlus size={16} /> Новая беседа
         </button>
+        <div className="side-label">Недавние</div>
         <div className="conv-list">
           {conversations.map((c) => (
             <div
@@ -369,7 +380,11 @@ export function App() {
               className={`conv ${c.id === active?.id ? "active" : ""}`}
               onClick={() => setActiveId(c.id)}
             >
-              <span className="conv-title">{c.title}</span>
+              <span className="cdot" />
+              <span className="conv-body">
+                <span className="conv-title">{c.title}</span>
+                <span className="conv-time">{relativeTime(c.updatedAt)}</span>
+              </span>
               <button
                 className="conv-del"
                 title="Удалить"
@@ -383,14 +398,26 @@ export function App() {
             </div>
           ))}
         </div>
+        <div className="sidebar-foot">
+          <span className={`fdot ${online === null ? "unknown" : online ? "on" : "off"}`} />
+          {online === null ? "проверка…" : online ? "мозг на связи" : "нет связи"}
+        </div>
       </aside>
 
       <main className="main">
-        <header className="titlebar" data-tauri-drag-region>
-          <span className="brand">
-            <IconSparkle size={17} /> SAI
-          </span>
-          <span className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`} title={online ? "Мозг на связи" : "Нет связи с мозгом"} />
+        <header className="topbar" data-tauri-drag-region>
+          <div className="crumbs">
+            <span>SAI</span>
+            <span className="sep">›</span>
+            <span>Чат</span>
+            <span className="sep">›</span>
+            <span className="cur">{active?.title ?? "Новая беседа"}</span>
+          </div>
+          <div className="spacer" />
+          <span
+            className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`}
+            title={online ? "Мозг на связи" : "Нет связи с мозгом"}
+          />
           <button
             className="provider-chip"
             title="Провайдер и модель — нажми для настроек"
@@ -398,7 +425,6 @@ export function App() {
           >
             {settings.provider === "anthropic" ? "Claude" : "Мозг"} · {settings.model}
           </button>
-          <div className="spacer" />
           <button
             className={`icon-btn ${showTerminal ? "active" : ""}`}
             title="Терминал"
@@ -433,38 +459,47 @@ export function App() {
           )}
           {active?.messages.map((m, i) => {
             const isLast = i === active.messages.length - 1;
+            const ai = m.role === "assistant";
             return (
               <div key={m.id} className={`msg ${m.role}`}>
-                <div className="bubble">
-                  {m.images && m.images.length > 0 && (
-                    <div className="msg-images">
-                      {m.images.map((src, k) => (
-                        <img key={k} src={src} alt="вложение" className="msg-image" />
-                      ))}
-                    </div>
-                  )}
-                  {m.role === "assistant" ? (
-                    m.content ? (
-                      <Markdown text={m.content} />
+                <span className={`avatar ${ai ? "ai" : "me"}`}>
+                  {ai ? <IconSparkle size={16} /> : <IconUser size={15} />}
+                </span>
+                <div className="msg-col">
+                  <div className="msg-meta">
+                    {ai ? "SAI" : "Вы"} · {clockTime(m.id)}
+                  </div>
+                  <div className="bubble">
+                    {m.images && m.images.length > 0 && (
+                      <div className="msg-images">
+                        {m.images.map((src, k) => (
+                          <img key={k} src={src} alt="вложение" className="msg-image" />
+                        ))}
+                      </div>
+                    )}
+                    {ai ? (
+                      m.content ? (
+                        <Markdown text={m.content} />
+                      ) : (
+                        busy && <span className="typing" />
+                      )
                     ) : (
-                      busy && <span className="typing">…</span>
-                    )
-                  ) : (
-                    m.content
-                  )}
-                </div>
-                {m.role === "assistant" && m.content && !busy && (
-                  <div className="msg-actions">
-                    <button onClick={() => void copyText(m.content)}>
-                      <IconCopy /> копировать
-                    </button>
-                    {isLast && (
-                      <button onClick={() => void regenerate()}>
-                        <IconRefresh /> заново
-                      </button>
+                      m.content
                     )}
                   </div>
-                )}
+                  {ai && m.content && !busy && (
+                    <div className="msg-actions">
+                      <button onClick={() => void copyText(m.content)}>
+                        <IconCopy /> копировать
+                      </button>
+                      {isLast && (
+                        <button onClick={() => void regenerate()}>
+                          <IconRefresh /> заново
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -522,20 +557,19 @@ export function App() {
             void addFiles(e.dataTransfer.files);
           }}
         >
-          <button
-            className={`agent-toggle ${agentMode ? "on" : ""}`}
-            title={agentMode ? "Агент включён: использует терминал и файлы" : "Включить агента (инструменты)"}
-            onClick={() => setAgentMode((a) => !a)}
-          >
-            <IconWand size={19} />
-          </button>
-          <button
-            className="attach-btn"
-            title="Прикрепить изображение (или вставь/перетащи)"
-            onClick={() => fileRef.current?.click()}
-          >
-            <IconPaperclip size={19} />
-          </button>
+          <textarea
+            value={input}
+            placeholder={`Сообщение ${settings.provider === "anthropic" ? "Claude" : "SAI"}…  (Enter — отправить)`}
+            onChange={(e) => setInput(e.target.value)}
+            onPaste={onPaste}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+            rows={2}
+          />
           <input
             ref={fileRef}
             type="file"
@@ -547,32 +581,57 @@ export function App() {
               e.target.value = "";
             }}
           />
-          <textarea
-            value={input}
-            placeholder="Сообщение…  (Enter — отправить, Shift+Enter — перенос)"
-            onChange={(e) => setInput(e.target.value)}
-            onPaste={onPaste}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            rows={2}
-          />
-          {busy ? (
-            <button className="send stop" title="Остановить" onClick={stop}>
-              <IconStop size={18} />
+          <div className="composer-tools">
+            <button
+              className="tool-btn"
+              title="Прикрепить изображение (или вставь/перетащи)"
+              onClick={() => fileRef.current?.click()}
+            >
+              <IconPaperclip size={16} /> Вложить
             </button>
-          ) : (
-            <button className="send" title="Отправить" onClick={() => void send()}>
-              <IconSend size={18} />
+            <button
+              className={`tool-btn ${agentMode ? "on" : ""}`}
+              title={agentMode ? "Агент включён: терминал, файлы, мышь/клавиатура" : "Включить агента (инструменты)"}
+              onClick={() => setAgentMode((a) => !a)}
+            >
+              <IconWand size={16} /> Агент
             </button>
-          )}
+            <div className="spacer" />
+            <span className={`status-pill ${busy ? "busy" : ""}`}>
+              <span className="pdot" />
+              {busy ? "работает" : agentMode ? "агент готов" : "готов"}
+            </span>
+            {busy ? (
+              <button className="send stop" onClick={stop}>
+                <IconStop size={15} /> Стоп
+              </button>
+            ) : (
+              <button className="send" onClick={() => void send()}>
+                Отправить <IconSend size={15} />
+              </button>
+            )}
+          </div>
         </div>
       </main>
     </div>
   );
+}
+
+/** Compact relative time for the sidebar ("только что", "5 мин", "2 ч", "3 д"). */
+function relativeTime(ts: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 45) return "только что";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} мин`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ч`;
+  const d = Math.floor(h / 24);
+  return `${d} д`;
+}
+
+/** HH:MM for message meta. */
+function clockTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
 /** "data:image/png;base64,AAAA" -> { mediaType, dataB64 } for the Anthropic vision API. */
