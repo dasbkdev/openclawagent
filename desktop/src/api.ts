@@ -52,7 +52,7 @@ const SETTINGS_KEY = "sai.brain.settings";
 export const DEFAULT_SETTINGS: BrainSettings = {
   // Route through the nikolay_ai brain (memory + integrations) over Tailscale by default.
   provider: "bridge",
-  endpoint: "https://nikolay-brain.taile8c475.ts.net",
+  endpoint: "https://main-server.taild4d010.ts.net",
   apiKey: "", // Bearer = brain_api_token; paste in ⚙
   model: "nikolay-assistant",
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
