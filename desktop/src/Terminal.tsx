@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { IconTerminal, IconTrash, IconX } from "./icons";
 
 type CommandResult = { stdout: string; stderr: string; code: number };
 
@@ -67,13 +68,15 @@ export function Terminal({ onClose }: { onClose: () => void }) {
   return (
     <div className="terminal">
       <div className="term-head">
-        <span>⌘ Терминал{cwd ? ` — ${cwd}` : ""}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <IconTerminal size={15} /> Терминал{cwd ? ` — ${cwd}` : ""}
+        </span>
         <div className="spacer" />
         <button className="icon-btn" onClick={() => setLines([])} title="Очистить">
-          ⌫
+          <IconTrash size={15} />
         </button>
         <button className="icon-btn" onClick={onClose} title="Закрыть">
-          ✕
+          <IconX size={15} />
         </button>
       </div>
       <div className="term-log" ref={logRef}>

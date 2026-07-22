@@ -2,6 +2,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CommandPalette, type Command } from "./CommandPalette";
 import {
+  IconCopy,
+  IconPaperclip,
+  IconPlus,
+  IconRefresh,
+  IconSend,
+  IconSettings,
+  IconSparkle,
+  IconStop,
+  IconTerminal,
+  IconTrash,
+  IconWand,
+  IconX,
+} from "./icons";
+import {
   type AgentMessage,
   type BrainSettings,
   type ChatMessage,
@@ -326,7 +340,7 @@ export function App() {
       <CommandPalette open={showPalette} commands={commands} onClose={() => setShowPalette(false)} />
       <aside className="sidebar">
         <button className="new-chat" onClick={createConversation}>
-          ＋ Новая беседа
+          <IconPlus size={16} /> Новая беседа
         </button>
         <div className="conv-list">
           {conversations.map((c) => (
@@ -344,7 +358,7 @@ export function App() {
                   deleteConversation(c.id);
                 }}
               >
-                ✕
+                <IconTrash size={15} />
               </button>
             </div>
           ))}
@@ -353,7 +367,9 @@ export function App() {
 
       <main className="main">
         <header className="titlebar" data-tauri-drag-region>
-          <span className="brand">✦ SAI</span>
+          <span className="brand">
+            <IconSparkle size={17} /> SAI
+          </span>
           <span className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`} title={online ? "Мозг на связи" : "Нет связи с мозгом"} />
           <button
             className="provider-chip"
@@ -368,10 +384,10 @@ export function App() {
             title="Терминал"
             onClick={() => setShowTerminal((s) => !s)}
           >
-            ⌘
+            <IconTerminal />
           </button>
           <button className="icon-btn" title="Настройки" onClick={() => setShowSettings((s) => !s)}>
-            ⚙
+            <IconSettings />
           </button>
         </header>
 
@@ -388,11 +404,11 @@ export function App() {
             <div className="empty">
               {settings.provider === "anthropic"
                 ? online
-                  ? "Спроси что угодно — говорю с Claude напрямую. 🛠 — агент, 📎 — картинки, Ctrl+K — команды."
-                  : "Открой ⚙ и вставь Anthropic API-ключ, чтобы начать."
+                  ? "Говорю с Claude напрямую. Слева от поля — агент и вложения, Ctrl+K — команды."
+                  : "Открой настройки и вставь Anthropic API-ключ, чтобы начать."
                 : online
-                  ? "Спроси что угодно — подключён к мозгу nikolay_ai. 🛠 — агент, 📎 — картинки, Ctrl+K — команды."
-                  : "Нет связи с мозгом. Подними Tailscale и проверь адрес/токен в ⚙."}
+                  ? "Подключён к мозгу nikolay_ai. Слева от поля — агент и вложения, Ctrl+K — команды."
+                  : "Нет связи с мозгом. Подними Tailscale и проверь адрес/токен в настройках."}
             </div>
           )}
           {active?.messages.map((m, i) => {
@@ -419,8 +435,14 @@ export function App() {
                 </div>
                 {m.role === "assistant" && m.content && !busy && (
                   <div className="msg-actions">
-                    <button onClick={() => void copyText(m.content)}>копировать</button>
-                    {isLast && <button onClick={() => void regenerate()}>↻ заново</button>}
+                    <button onClick={() => void copyText(m.content)}>
+                      <IconCopy /> копировать
+                    </button>
+                    {isLast && (
+                      <button onClick={() => void regenerate()}>
+                        <IconRefresh /> заново
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -465,7 +487,7 @@ export function App() {
                   title="Убрать"
                   onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== k))}
                 >
-                  ✕
+                  <IconX size={12} />
                 </button>
               </div>
             ))}
@@ -485,14 +507,14 @@ export function App() {
             title={agentMode ? "Агент включён: использует терминал и файлы" : "Включить агента (инструменты)"}
             onClick={() => setAgentMode((a) => !a)}
           >
-            🛠
+            <IconWand size={19} />
           </button>
           <button
             className="attach-btn"
             title="Прикрепить изображение (или вставь/перетащи)"
             onClick={() => fileRef.current?.click()}
           >
-            📎
+            <IconPaperclip size={19} />
           </button>
           <input
             ref={fileRef}
@@ -519,12 +541,12 @@ export function App() {
             rows={2}
           />
           {busy ? (
-            <button className="send stop" onClick={stop}>
-              Стоп
+            <button className="send stop" title="Остановить" onClick={stop}>
+              <IconStop size={18} />
             </button>
           ) : (
-            <button className="send" onClick={() => void send()}>
-              ➤
+            <button className="send" title="Отправить" onClick={() => void send()}>
+              <IconSend size={18} />
             </button>
           )}
         </div>
