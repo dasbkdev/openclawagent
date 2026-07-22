@@ -35,8 +35,10 @@
   --shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.65);
   --ease: cubic-bezier(0.16, 1, 0.3, 1);
 
-  font-family: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-family: "Inter Variable", "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+  letter-spacing: -0.006em;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -223,25 +225,42 @@ button {
   background: var(--accent-soft);
 }
 
-.sidebar-foot {
+.side-foot {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 8px 2px;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px;
+  margin-top: 2px;
+  background: transparent;
+  border: none;
   border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--faint);
+  border-radius: 0;
+  color: var(--muted);
+  transition: background 0.14s;
 }
-.sidebar-foot .fdot {
+.side-foot:hover {
+  background: var(--hover);
+}
+.side-foot .foot-model {
+  flex: 1;
+  text-align: left;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-foot .fdot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--faint);
+  flex: none;
 }
-.sidebar-foot .fdot.on {
+.side-foot .fdot.on {
   background: var(--green);
 }
-.sidebar-foot .fdot.off {
+.side-foot .fdot.off {
   background: var(--danger);
 }
 
@@ -251,6 +270,7 @@ button {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: relative;
 }
 
 .topbar {
@@ -361,10 +381,53 @@ button {
 
 .empty {
   margin: auto;
-  max-width: 440px;
-  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 520px;
   text-align: center;
-  line-height: 1.6;
+  padding: 24px;
+}
+.empty-mark {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  margin-bottom: 20px;
+}
+.empty-title {
+  font-size: 26px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+}
+.empty-sub {
+  color: var(--muted);
+  margin: 0 0 22px;
+  line-height: 1.55;
+}
+.empty-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.chip {
+  padding: 8px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12.5px;
+  transition: color 0.14s, border-color 0.14s, background 0.14s;
+}
+.chip:hover {
+  color: var(--text);
+  background: var(--hover);
+  border-color: var(--accent-line);
 }
 
 .msg {
@@ -619,21 +682,54 @@ button {
 .send:active {
   transform: scale(0.97);
 }
+.send:disabled {
+  opacity: 0.4;
+  cursor: default;
+  filter: none;
+  transform: none;
+}
 .send.stop {
   background: transparent;
   color: var(--accent);
   border: 1px solid var(--accent-line);
 }
 
-/* ---------------- settings ---------------- */
+/* ---------------- settings (modal) ---------------- */
+.modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 4, 6, 0.66);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  animation: fade 0.15s var(--ease);
+}
+.modal {
+  width: min(520px, 92%);
+  max-height: 86vh;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  animation: pop 0.19s var(--ease);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 620;
+  font-size: 15px;
+}
 .settings {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 18px 8%;
-  background: var(--panel-2);
-  border-bottom: 1px solid var(--border);
-  animation: msg-in 0.2s var(--ease);
+  gap: 14px;
+  padding: 18px;
 }
 .settings label {
   display: flex;

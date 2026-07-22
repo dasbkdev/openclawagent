@@ -398,10 +398,11 @@ export function App() {
             </div>
           ))}
         </div>
-        <div className="sidebar-foot">
+        <button className="side-foot" onClick={() => setShowSettings(true)} title="Настройки">
           <span className={`fdot ${online === null ? "unknown" : online ? "on" : "off"}`} />
-          {online === null ? "проверка…" : online ? "мозг на связи" : "нет связи"}
-        </div>
+          <span className="foot-model">{settings.model}</span>
+          <IconSettings size={15} />
+        </button>
       </aside>
 
       <main className="main">
@@ -414,17 +415,6 @@ export function App() {
             <span className="cur">{active?.title ?? "Новая беседа"}</span>
           </div>
           <div className="spacer" />
-          <span
-            className={`dot ${online === null ? "unknown" : online ? "on" : "off"}`}
-            title={online ? "Мозг на связи" : "Нет связи с мозгом"}
-          />
-          <button
-            className="provider-chip"
-            title="Провайдер и модель — нажми для настроек"
-            onClick={() => setShowSettings(true)}
-          >
-            {settings.provider === "anthropic" ? "Claude" : "Мозг"} · {settings.model}
-          </button>
           <button
             className={`icon-btn ${showTerminal ? "active" : ""}`}
             title="Терминал"
@@ -438,23 +428,46 @@ export function App() {
         </header>
 
         {showSettings && (
-          <SettingsPanel
-            settings={settings}
-            onSave={persistSettings}
-            onClose={() => setShowSettings(false)}
-          />
+          <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <span>Настройки</span>
+                <button className="icon-btn" onClick={() => setShowSettings(false)} title="Закрыть">
+                  <IconX size={16} />
+                </button>
+              </div>
+              <SettingsPanel
+                settings={settings}
+                onSave={persistSettings}
+                onClose={() => setShowSettings(false)}
+              />
+            </div>
+          </div>
         )}
 
         <div className="messages" ref={listRef}>
           {(!active || active.messages.length === 0) && (
             <div className="empty">
-              {settings.provider === "anthropic"
-                ? online
-                  ? "Говорю с Claude напрямую. Слева от поля — агент и вложения, Ctrl+K — команды."
-                  : "Открой настройки и вставь Anthropic API-ключ, чтобы начать."
-                : online
-                  ? "Подключён к мозгу nikolay_ai. Слева от поля — агент и вложения, Ctrl+K — команды."
-                  : "Нет связи с мозгом. Подними Tailscale и проверь адрес/токен в настройках."}
+              <span className="empty-mark">
+                <IconSparkle size={30} />
+              </span>
+              <h1 className="empty-title">Чем помочь?</h1>
+              <p className="empty-sub">
+                {online === false
+                  ? "Нет связи с мозгом — проверь настройки."
+                  : "Спроси что угодно или включи агента, чтобы действовать на компьютере."}
+              </p>
+              <div className="empty-chips">
+                {[
+                  "Что у меня по задачам сегодня?",
+                  "Собери сводку почты",
+                  "Наведи порядок в папке Загрузки",
+                ].map((s) => (
+                  <button key={s} className="chip" onClick={() => void sendText(s)}>
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {active?.messages.map((m, i) => {
@@ -597,16 +610,12 @@ export function App() {
               <IconWand size={16} /> Агент
             </button>
             <div className="spacer" />
-            <span className={`status-pill ${busy ? "busy" : ""}`}>
-              <span className="pdot" />
-              {busy ? "работает" : agentMode ? "агент готов" : "готов"}
-            </span>
             {busy ? (
               <button className="send stop" onClick={stop}>
                 <IconStop size={15} /> Стоп
               </button>
             ) : (
-              <button className="send" onClick={() => void send()}>
+              <button className="send" onClick={() => void send()} disabled={!input.trim() && attachments.length === 0}>
                 Отправить <IconSend size={15} />
               </button>
             )}
