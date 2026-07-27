@@ -32,11 +32,13 @@ import {
   claimNextTask,
   type DesktopTask,
   fetchModels,
+  fetchUsage,
   loadSettings,
   ping,
   reportTaskResult,
   saveSettings,
   streamChat,
+  type UsageToday,
 } from "./api";
 import {
   type Conversation,
@@ -94,6 +96,7 @@ export function App() {
   const [models, setModels] = useState<string[]>(ANTHROPIC_MODELS);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
+  const [usage, setUsage] = useState<UsageToday | null>(null);
   const [autostart, setAutostart] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("listening");
@@ -196,6 +199,7 @@ export function App() {
     }
     try {
       hfRef.current = await startHandsFree({
+        startRms: settings.voiceSensitivity ?? 0.06,
         isBusy: () => busyRef.current || hfProcessingRef.current || speakingRef.current,
         onState: (s) => {
           if (busyRef.current || hfProcessingRef.current || speakingRef.current) return;
@@ -248,6 +252,17 @@ export function App() {
     const check = () => ping(settings).then((ok) => alive && setOnline(ok));
     void check();
     const t = setInterval(check, 15000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [settings]);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => void fetchUsage(settings).then((u) => alive && setUsage(u));
+    load();
+    const t = setInterval(load, 60000);
     return () => {
       alive = false;
       clearInterval(t);
@@ -483,7 +498,7 @@ export function App() {
       if (shouldSpeak) {
         speakingRef.current = true;
         if (voiceModeRef.current) setVoicePhase("speaking");
-        void speak(full, key as string, settings.elevenVoice || "JBFqnCBsd6RMkjVDRZzb")
+        void speak(full, key as string, settings.elevenVoice || "JBFqnCBsd6RMkjVDRZzb", settings.voiceVolume ?? 2.4)
           .catch(() => {})
           .finally(() => {
             speakingRef.current = false;
@@ -785,6 +800,19 @@ export function App() {
             )}
           </div>
           <div className="spacer" />
+          {visionMode && (
+            <span className="vision-flag" title="SAI видит твой экран (снимок к каждой реплике)">
+              👁 видит экран
+            </span>
+          )}
+          {usage && (
+            <span
+              className="usage-chip"
+              title={`ИИ за сутки: ${usage.calls} обращений к облаку, ${usage.tokens.toLocaleString("ru-RU")} токенов`}
+            >
+              ≈${usage.cost_usd.toFixed(2)} · {fmtTokens(usage.tokens)}
+            </span>
+          )}
           {settings.dangerMode && (
             <span className="danger-flag" title="Разрешения отключены — асик действует без подтверждений">
               без ограничений
@@ -1045,6 +1073,13 @@ function clockTime(ts: number): string {
   return new Date(ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
+/** Compact token count for the usage chip (769216 -> "769k", 1_200_000 -> "1.2M"). */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
 /** "data:image/png;base64,AAAA" -> { mediaType, dataB64 } for the Anthropic vision API. */
 function dataUrlToImageInput(url: string): ImageInput | null {
   const m = /^data:([^;]+);base64,(.*)$/s.exec(url);
@@ -1152,6 +1187,28 @@ function SettingsPanel(props: {
           value={draft.elevenVoice ?? ""}
           onChange={(e) => setDraft({ ...draft, elevenVoice: e.target.value })}
           placeholder="JBFqnCBsd6RMkjVDRZzb"
+        />
+      </label>
+      <label>
+        Громкость озвучки: ×{(draft.voiceVolume ?? 2.4).toFixed(1)}
+        <input
+          type="range"
+          min="0.5"
+          max="5"
+          step="0.1"
+          value={draft.voiceVolume ?? 2.4}
+          onChange={(e) => setDraft({ ...draft, voiceVolume: Number(e.target.value) })}
+        />
+      </label>
+      <label>
+        Порог микрофона (меньше — чувствительнее): {(draft.voiceSensitivity ?? 0.06).toFixed(3)}
+        <input
+          type="range"
+          min="0.02"
+          max="0.14"
+          step="0.005"
+          value={draft.voiceSensitivity ?? 0.06}
+          onChange={(e) => setDraft({ ...draft, voiceSensitivity: Number(e.target.value) })}
         />
       </label>
 

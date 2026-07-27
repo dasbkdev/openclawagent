@@ -25,9 +25,6 @@ export async function transcribe(blob: Blob, apiKey: string): Promise<string> {
 let playCtx: AudioContext | null = null;
 let currentSrc: AudioBufferSourceNode | null = null;
 
-/** Loudness multiplier for spoken replies (>1 = louder than source, for clarity). */
-const PLAYBACK_GAIN = 2.4;
-
 /** Stop any reply currently being spoken. */
 export function stopSpeaking(): void {
   if (currentSrc) {
@@ -45,7 +42,12 @@ export function stopSpeaking(): void {
  * a Web Audio gain stage to lift the volume above 100%. Resolves when playback ends (or is
  * interrupted), so the caller can track the "speaking" state.
  */
-export async function speak(text: string, apiKey: string, voiceId: string): Promise<void> {
+export async function speak(
+  text: string,
+  apiKey: string,
+  voiceId: string,
+  gain = 2.4,
+): Promise<void> {
   const clean = text
     .replace(/```[\s\S]*?```/g, " код ")
     .replace(/`[^`]*`/g, "")
@@ -77,9 +79,9 @@ export async function speak(text: string, apiKey: string, voiceId: string): Prom
   stopSpeaking();
   const src = playCtx.createBufferSource();
   src.buffer = decoded;
-  const gain = playCtx.createGain();
-  gain.gain.value = PLAYBACK_GAIN;
-  src.connect(gain).connect(playCtx.destination);
+  const gainNode = playCtx.createGain();
+  gainNode.gain.value = Math.max(0.5, Math.min(6, gain));
+  src.connect(gainNode).connect(playCtx.destination);
   currentSrc = src;
   await new Promise<void>((resolve) => {
     src.onended = () => {
@@ -102,10 +104,11 @@ type HandsFreeOpts = {
   // Fired the moment the user starts talking (used for barge-in: stop any spoken reply).
   onSpeechStart?: () => void;
   onState?: (s: "idle" | "listening" | "recording") => void;
+  // Mic loudness (RMS) that starts a segment. Lower = more sensitive. Default START_RMS.
+  startRms?: number;
 };
 
-const START_RMS = 0.06; // loudness above which a new speech segment begins (noise gate)
-const KEEP_RMS = 0.04; // loudness that counts as "still talking" inside a segment
+const START_RMS = 0.06; // default loudness gate to begin a speech segment (see startRms)
 const SILENCE_MS = 850; // trailing quiet that ends a segment (snappier auto-send)
 const MIN_SEGMENT_MS = 350; // shorter blips are ignored (coughs, clicks)
 
@@ -120,6 +123,8 @@ export async function startHandsFree(opts: HandsFreeOpts): Promise<HandsFreeHand
   ctx.createMediaStreamSource(stream).connect(analyser);
   const buf = new Float32Array(analyser.fftSize);
 
+  const startRms = opts.startRms ?? START_RMS;
+  const keepRms = startRms * 0.66;
   let stopped = false;
   let rec: MediaRecorder | null = null;
   let chunks: BlobPart[] = [];
@@ -162,9 +167,9 @@ export async function startHandsFree(opts: HandsFreeOpts): Promise<HandsFreeHand
     if (stopped) return;
     const level = rms();
     if (rec) {
-      if (level > KEEP_RMS) lastVoice = performance.now();
+      if (level > keepRms) lastVoice = performance.now();
       if (performance.now() - lastVoice > SILENCE_MS) endSeg();
-    } else if (!opts.isBusy() && level > START_RMS) {
+    } else if (!opts.isBusy() && level > startRms) {
       startSeg();
     } else {
       opts.onState?.(opts.isBusy() ? "idle" : "listening");

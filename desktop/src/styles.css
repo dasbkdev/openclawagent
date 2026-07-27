@@ -1466,6 +1466,28 @@ button {
   50% { box-shadow: 0 0 0 6px var(--accent-soft); }
 }
 
+/* Control-strip chips: token spend + vision indicator */
+.usage-chip {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vision-flag {
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* Voice picker dropdown */
 .voice-menu {
   max-height: 320px;

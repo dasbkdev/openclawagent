@@ -40,6 +40,8 @@ export type BrainSettings = {
   elevenKey?: string; // ElevenLabs API key for voice (STT/TTS); empty = voice off
   elevenVoice?: string; // ElevenLabs voice id
   speakReplies?: boolean; // in text mode, also read replies aloud (voice mode always speaks)
+  voiceVolume?: number; // TTS playback gain (1 = normal, up to ~4 = much louder)
+  voiceSensitivity?: number; // hands-free mic threshold (RMS); lower = more sensitive
 };
 
 export const DEFAULT_SYSTEM_PROMPT =
@@ -70,7 +72,27 @@ export const DEFAULT_SETTINGS: BrainSettings = {
   elevenKey: "",
   elevenVoice: "JBFqnCBsd6RMkjVDRZzb", // George (multilingual) — same voice as the Telegram bot
   speakReplies: false,
+  voiceVolume: 2.4,
+  voiceSensitivity: 0.06,
 };
+
+export type UsageToday = { calls: number; tokens: number; cost_usd: number };
+
+/** Fetch the brain's last-24h cloud-LLM spend (bridge provider only). Null on any failure. */
+export async function fetchUsage(settings: BrainSettings): Promise<UsageToday | null> {
+  if (settings.provider !== "bridge") return null;
+  try {
+    const url = settings.endpoint.replace(/\/+$/, "") + "/v1/usage";
+    const headers: Record<string, string> = {};
+    if (settings.apiKey) headers.Authorization = `Bearer ${settings.apiKey}`;
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return { calls: Number(j?.calls ?? 0), tokens: Number(j?.tokens ?? 0), cost_usd: Number(j?.cost_usd ?? 0) };
+  } catch {
+    return null;
+  }
+}
 
 export function loadSettings(): BrainSettings {
   try {
