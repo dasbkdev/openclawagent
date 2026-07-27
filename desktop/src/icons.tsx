@@ -127,3 +127,31 @@ export const IconRefresh = ({ size = 15, className }: P) => (
     <path d="M19 9a8 8 0 00-14-2.5L4 9M5 15a8 8 0 0014 2.5l1-2.5" />
   </svg>
 );
+
+export const IconMic = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5 11a7 7 0 0014 0M12 18v3" />
+  </svg>
+);
+
+export const IconVolume = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M4 9v6h4l5 4V5L8 9H4z" />
+    <path d="M16 9a3 3 0 010 6M18.5 7a6 6 0 010 10" />
+  </svg>
+);
+
+export const IconEye = ({ size = 16, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+export const IconClock = ({ size = 15, className }: P) => (
+  <svg {...base(size)} className={className}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 7v5l3 2" />
+  </svg>
+);

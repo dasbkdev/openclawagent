@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { type BrainSettings, type DesktopTask, createTask, listTasks } from "./api";
-import { IconPlus, IconX } from "./icons";
+import { IconClock, IconPlus, IconX } from "./icons";
 
 const STATUS_RU: Record<string, string> = {
   pending: "в очереди",
@@ -19,6 +19,7 @@ export function TasksPanel({ settings, queueOn, onToggleQueue, onClose }: {
 }) {
   const [tasks, setTasks] = useState<DesktopTask[]>([]);
   const [text, setText] = useState("");
+  const [when, setWhen] = useState(""); // datetime-local value for scheduling
 
   useEffect(() => {
     let alive = true;
@@ -31,12 +32,14 @@ export function TasksPanel({ settings, queueOn, onToggleQueue, onClose }: {
     };
   }, [settings]);
 
-  async function add() {
+  async function add(schedule = false) {
     const t = text.trim();
     if (!t) return;
+    const runAt = schedule && when ? new Date(when).toISOString() : undefined;
     setText("");
+    if (schedule) setWhen("");
     try {
-      await createTask(settings, t);
+      await createTask(settings, t, runAt ? { runAt } : {});
     } catch {
       // ignore — list refresh will reflect reality
     }
@@ -74,11 +77,28 @@ export function TasksPanel({ settings, queueOn, onToggleQueue, onClose }: {
               placeholder="Новая задача для SAI…"
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") void add();
+                if (e.key === "Enter") void add(false);
               }}
             />
-            <button className="send" onClick={() => void add()} disabled={!text.trim()}>
+            <button className="send" onClick={() => void add(false)} disabled={!text.trim()}>
               <IconPlus size={15} /> В очередь
+            </button>
+          </div>
+          <div className="task-schedule">
+            <IconClock size={15} />
+            <input
+              type="datetime-local"
+              value={when}
+              onChange={(e) => setWhen(e.target.value)}
+              title="Когда выполнить задачу"
+            />
+            <button
+              className="send ghost"
+              onClick={() => void add(true)}
+              disabled={!text.trim() || !when}
+              title={!when ? "Укажи дату и время" : "Запланировать на выбранное время"}
+            >
+              <IconClock size={14} /> Запланировать
             </button>
           </div>
 
@@ -90,6 +110,9 @@ export function TasksPanel({ settings, queueOn, onToggleQueue, onClose }: {
                 <div className="task-main">
                   <div className="task-instr">{t.instruction}</div>
                   {t.result && <div className="task-result">{t.result}</div>}
+                  {t.run_at && (
+                    <div className="task-src">⏰ {new Date(t.run_at).toLocaleString("ru-RU")}</div>
+                  )}
                   {t.source === "telegram" && <div className="task-src">из Telegram</div>}
                 </div>
               </div>

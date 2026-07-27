@@ -3,6 +3,7 @@
 // not depend on the brain bridge. The webview is allowed to call the API directly via the
 // `anthropic-dangerous-direct-browser-access` header.
 
+import { invoke } from "@tauri-apps/api/core";
 import { type AgentMessage, type BrainSettings, type ToolDef } from "./api";
 import { type AgentCallbacks, DESTRUCTIVE, TOOLS, describeCall, executeTool } from "./agent";
 
@@ -17,7 +18,13 @@ type AnthropicTool = { name: string; description: string; input_schema: Record<s
 type TextBlock = { type: "text"; text: string };
 type ImageBlock = { type: "image"; source: { type: "base64"; media_type: string; data: string } };
 type ToolUseBlock = { type: "tool_use"; id: string; name: string; input: unknown };
-type ToolResultBlock = { type: "tool_result"; tool_use_id: string; content: string };
+// tool_result content is a plain string, except for see_screen which returns image blocks
+// so Claude actually sees the pixels (native vision over a tool result).
+type ToolResultBlock = {
+  type: "tool_result";
+  tool_use_id: string;
+  content: string | Array<TextBlock | ImageBlock>;
+};
 type ContentBlock = TextBlock | ImageBlock | ToolUseBlock | ToolResultBlock;
 type Msg = { role: "user" | "assistant"; content: ContentBlock[] };
 
@@ -175,6 +182,23 @@ export async function runAnthropicAgent(
     const results: ContentBlock[] = [];
     for (const call of out.toolUses) {
       const args = safeParse(call.input) as Record<string, unknown>;
+      // see_screen: capture the screen and hand the actual image back to the model (vision),
+      // not a file path. Read-only, so it never needs approval.
+      if (call.name === "see_screen") {
+        cb.onStep("🛠 see_screen()");
+        try {
+          const content = await captureScreenBlocks();
+          results.push({ type: "tool_result", tool_use_id: call.id, content });
+          cb.onStep("↳ 👁 экран передан на анализ");
+        } catch (e) {
+          results.push({
+            type: "tool_result",
+            tool_use_id: call.id,
+            content: `не удалось захватить экран: ${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
+        continue;
+      }
       cb.onStep(`🛠 ${call.name}(${short(call.input)})`);
       if (DESTRUCTIVE.has(call.name) && cb.onApprove) {
         const ok = await cb.onApprove(describeCall(call.name, args));
@@ -211,6 +235,16 @@ export async function streamAnthropicChat(
   }
   const { system, messages } = buildMessages(history, images);
   await streamOnce(settings, system, messages, [], onText, signal);
+}
+
+/** Capture the screen and return it as vision blocks for a tool_result (see_screen). */
+async function captureScreenBlocks(): Promise<Array<TextBlock | ImageBlock>> {
+  const path = await invoke<string>("screenshot");
+  const dataB64 = await invoke<string>("read_file_base64", { path });
+  return [
+    { type: "text", text: "Текущий экран:" },
+    { type: "image", source: { type: "base64", media_type: "image/png", data: dataB64 } },
+  ];
 }
 
 function safeParse(s: string): unknown {

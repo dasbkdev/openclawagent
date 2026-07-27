@@ -37,6 +37,9 @@ export type BrainSettings = {
   systemPrompt: string;
   theme: Theme;
   dangerMode: boolean; // when true, agent runs destructive tools without asking
+  elevenKey?: string; // ElevenLabs API key for voice (STT/TTS); empty = voice off
+  elevenVoice?: string; // ElevenLabs voice id
+  speakReplies?: boolean; // in text mode, also read replies aloud (voice mode always speaks)
 };
 
 export const DEFAULT_SYSTEM_PROMPT =
@@ -64,6 +67,9 @@ export const DEFAULT_SETTINGS: BrainSettings = {
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   theme: "dark",
   dangerMode: false,
+  elevenKey: "",
+  elevenVoice: "JBFqnCBsd6RMkjVDRZzb", // George (multilingual) — same voice as the Telegram bot
+  speakReplies: false,
 };
 
 export function loadSettings(): BrainSettings {

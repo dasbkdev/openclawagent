@@ -22,11 +22,17 @@ pub struct CommandResult {
 // Run one shell command in the built-in terminal. This is a personal tool on the Owner's
 // own machine — the terminal is an explicit feature (OpenClaw parity), so it executes what
 // the user (or later the agent, with confirmation) asks. PowerShell on Windows, bash elsewhere.
+// Force PowerShell + native exes to emit UTF-8 so Cyrillic (window titles, output) isn't
+// mangled by the console's OEM code page (cp866 on RU Windows) when we read it as UTF-8.
+#[cfg(target_os = "windows")]
+const PS_UTF8: &str =
+    "$OutputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; chcp 65001 > $null; ";
+
 #[tauri::command]
 fn run_command(cmd: String, cwd: Option<String>) -> CommandResult {
     let mut command = if cfg!(target_os = "windows") {
         let mut c = Command::new("powershell.exe");
-        c.arg("-NoProfile").arg("-Command").arg(&cmd);
+        c.arg("-NoProfile").arg("-Command").arg(format!("{PS_UTF8}{cmd}"));
         c
     } else {
         let mut c = Command::new("bash");
@@ -370,7 +376,14 @@ fn clipboard_set(text: String) -> Result<(), String> {
 #[tauri::command]
 fn list_processes() -> Result<String, String> {
     let out = if cfg!(target_os = "windows") {
-        Command::new("tasklist").arg("/FO").arg("CSV").arg("/NH").output()
+        Command::new("powershell.exe").args([
+            "-NoProfile",
+            "-Command",
+            &format!(
+                "{PS_UTF8}Get-Process | Sort-Object WS -Descending | Select-Object -First 60 | \
+                 ForEach-Object {{ \"$($_.ProcessName) (pid $($_.Id))\" }}"
+            ),
+        ]).output()
     } else {
         Command::new("ps").arg("-eo").arg("comm").output()
     };
@@ -385,7 +398,7 @@ fn list_windows() -> Result<String, String> {
         Command::new("powershell.exe").args([
             "-NoProfile",
             "-Command",
-            "Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { \"$($_.ProcessName): $($_.MainWindowTitle)\" }",
+            &format!("{PS_UTF8}Get-Process | Where-Object {{ $_.MainWindowTitle }} | ForEach-Object {{ \"$($_.ProcessName): $($_.MainWindowTitle)\" }}"),
         ]).output()
     } else if cfg!(target_os = "macos") {
         Command::new("osascript").args([
@@ -406,7 +419,7 @@ fn active_window() -> Result<String, String> {
         Command::new("powershell.exe").args([
             "-NoProfile",
             "-Command",
-            "Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);' -Name U -Namespace W -PassThru | Out-Null; $h=[W.U]::GetForegroundWindow(); $p=0; [W.U]::GetWindowThreadProcessId($h,[ref]$p) | Out-Null; $proc=Get-Process -Id $p; \"$($proc.ProcessName): $($proc.MainWindowTitle)\"",
+            &format!("{PS_UTF8}Add-Type -MemberDefinition '[DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);' -Name U -Namespace W -PassThru | Out-Null; $h=[W.U]::GetForegroundWindow(); $p=0; [W.U]::GetWindowThreadProcessId($h,[ref]$p) | Out-Null; $proc=Get-Process -Id $p; \"$($proc.ProcessName): $($proc.MainWindowTitle)\""),
         ]).output()
     } else if cfg!(target_os = "macos") {
         Command::new("osascript").args([
@@ -534,6 +547,15 @@ pub fn run() {
                 .build(app)?;
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Close = hide to tray, don't quit. SAI stays alive in the background so the task
+            // queue keeps polling and the global hotkey can bring it back. Real quit is the
+            // tray "Выход" item (app.exit).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running SAI desktop");

@@ -1453,3 +1453,96 @@ button {
   font-size: 11px;
   color: var(--faint);
 }
+
+/* Voice: recording pulse on the mic button */
+.tool-btn.rec {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: recPulse 1.2s ease-in-out infinite;
+}
+@keyframes recPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); }
+  50% { box-shadow: 0 0 0 6px var(--accent-soft); }
+}
+
+/* Voice picker dropdown */
+.voice-menu {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ctrl-group {
+  padding: 9px 12px 4px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+  font-weight: 700;
+}
+.voice-menu .ctrl-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ctrl-opt-desc {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Voice mode — single button, states by phase */
+.voice-btn.on {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  min-width: 108px;
+  justify-content: center;
+}
+.voice-btn.on.listening {
+  color: var(--accent);
+}
+.voice-btn.on.hearing {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+  animation: recPulse 1s ease-in-out infinite;
+}
+.voice-btn.on.recognizing,
+.voice-btn.on.thinking,
+.voice-btn.on.speaking {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+
+/* Task scheduling row */
+.task-schedule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted);
+}
+.task-schedule input[type="datetime-local"] {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  font: inherit;
+  color-scheme: dark;
+}
+.task-schedule input[type="datetime-local"]:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
+.send.ghost {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+}
+.send.ghost:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent-line);
+}

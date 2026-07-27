@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nikolay AI — система персонального ИИ-ассистента</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --accent:#e5484d;
+  --accent-2:#ff6b6f;
+  --bg:#0b0c0e;
+  --panel:#141519;
+  --panel-2:#1b1d22;
+  --border:#26282e;
+  --border-strong:#33363d;
+  --text:#f4f5f7;
+  --muted:#9aa0ab;
+  --muted-2:#6b7078;
+  --good:#3fb950;
+  --warn:#e3b341;
+  --grad:linear-gradient(135deg,#f86a6a 0%,#e5484d 55%,#b0333a 100%);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:'Inter',system-ui,sans-serif;
+  overflow:hidden;-webkit-font-smoothing:antialiased;
+}
+.slide-deck{position:relative;width:100vw;height:100vh;overflow:hidden}
+@media(min-width:769px){
+  .slide-deck{max-width:calc(100vh*16/9);max-height:calc(100vw*9/16);margin:auto;position:absolute;inset:0}
+}
+.slide{
+  position:absolute;inset:0;width:100%;height:100%;
+  display:flex;flex-direction:column;justify-content:center;
+  padding:clamp(28px,5vw,72px);
+  opacity:0;visibility:hidden;transition:opacity .45s ease;
+  background:
+    radial-gradient(1200px 600px at 85% -10%,rgba(229,72,77,.10),transparent 60%),
+    radial-gradient(900px 500px at -10% 110%,rgba(229,72,77,.06),transparent 55%),
+    var(--bg);
+  overflow:hidden;
+}
+.slide.active{opacity:1;visibility:visible}
+.slide-content{width:100%;max-width:1180px;margin:0 auto}
+
+/* kicker / eyebrow */
+.kicker{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:clamp(11px,1.3vw,13px);font-weight:700;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent-2);margin-bottom:22px;
+}
+.kicker::before{content:"";width:26px;height:2px;background:var(--grad);border-radius:2px}
+
+h1{font-weight:900;line-height:1.04;letter-spacing:-.02em;font-size:clamp(38px,6.5vw,84px)}
+h2{font-weight:800;line-height:1.08;letter-spacing:-.015em;font-size:clamp(28px,4.4vw,52px)}
+.grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.lead{font-size:clamp(16px,2vw,22px);color:var(--muted);line-height:1.5;max-width:820px;margin-top:18px}
+.section-title{margin-bottom:30px}
+
+/* generic grid */
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:768px){.g3,.g4{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}}
+
+.card{
+  background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);
+  border:1px solid var(--border);border-radius:16px;padding:22px 22px;
+  position:relative;overflow:hidden;
+}
+.card.accent{border-color:rgba(229,72,77,.35)}
+.card .num{font-weight:900;font-size:clamp(30px,4.2vw,46px);letter-spacing:-.02em;line-height:1}
+.card .num.grad-text{filter:drop-shadow(0 2px 14px rgba(229,72,77,.25))}
+.card .lbl{color:var(--muted);font-size:clamp(12px,1.5vw,15px);margin-top:10px;font-weight:500}
+.card .sub{color:var(--muted-2);font-size:12px;margin-top:6px}
+
+/* pill list */
+.pill{display:inline-flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);
+  border-radius:999px;padding:8px 14px;font-size:14px;font-weight:600;color:var(--text)}
+.dot{width:9px;height:9px;border-radius:50%}
+.dot.ok{background:var(--good);box-shadow:0 0 10px rgba(63,185,80,.6)}
+.dot.warn{background:var(--warn);box-shadow:0 0 10px rgba(227,179,65,.6)}
+
+/* two-column honest */
+.col{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:24px}
+.col h3{font-size:clamp(17px,2vw,22px);font-weight:800;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.col ul{list-style:none;display:flex;flex-direction:column;gap:11px}
+.col li{display:flex;gap:11px;font-size:clamp(13px,1.6vw,16px);color:var(--muted);line-height:1.4}
+.col li b{color:var(--text);font-weight:600}
+.mk{flex:0 0 auto;margin-top:2px;font-weight:900}
+.mk.g{color:var(--good)}.mk.y{color:var(--warn)}
+
+/* architecture nodes */
+.arch{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
+@media(max-width:768px){.arch{grid-template-columns:repeat(2,1fr)}}
+.node{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px 14px;text-align:center}
+.node .ico{font-size:26px;margin-bottom:10px}
+.node .nm{font-weight:700;font-size:14px}
+.node .ds{color:var(--muted-2);font-size:11.5px;margin-top:5px;line-height:1.35}
+.node.brain{border-color:rgba(229,72,77,.45);background:linear-gradient(180deg,rgba(229,72,77,.10),var(--panel))}
+
+.chart-wrap{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:22px}
+.feat{display:flex;gap:14px;align-items:flex-start;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px}
+.feat .fi{font-size:24px;flex:0 0 auto}
+.feat h4{font-size:15px;font-weight:700;margin-bottom:5px}
+.feat p{font-size:13px;color:var(--muted);line-height:1.4}
+
+.footer-note{position:absolute;bottom:22px;left:clamp(28px,5vw,72px);font-size:12px;color:var(--muted-2);font-weight:500}
+
+/* progress + nav */
+.progress-bar{position:fixed;top:0;left:0;height:3px;background:var(--grad);transition:width .3s;z-index:1000}
+.nav-controls{position:fixed;bottom:22px;right:26px;display:flex;align-items:center;gap:14px;z-index:1000}
+.nav-btn{background:var(--panel);border:1px solid var(--border-strong);color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;font-size:17px;transition:.2s;display:flex;align-items:center;justify-content:center}
+.nav-btn:hover{background:var(--accent);border-color:var(--accent)}
+.slide-counter{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+
+.animate-stagger>*{opacity:0;animation:fadeUp .5s ease-out forwards}
+.animate-stagger>*:nth-child(1){animation-delay:.05s}
+.animate-stagger>*:nth-child(2){animation-delay:.12s}
+.animate-stagger>*:nth-child(3){animation-delay:.19s}
+.animate-stagger>*:nth-child(4){animation-delay:.26s}
+.animate-stagger>*:nth-child(5){animation-delay:.33s}
+.animate-stagger>*:nth-child(6){animation-delay:.40s}
+@keyframes fadeUp{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:768px){.footer-note{display:none}}
+</style>
+</head>
+<body>
+<div class="progress-bar" id="progressBar"></div>
+<div class="slide-deck">
+
+<!-- 1 · TITLE -->
+<div class="slide active">
+  <div class="slide-content">
+    <div class="kicker">Персональная ИИ-система · внутренний продукт</div>
+    <h1>Nikolay&nbsp;AI <span class="grad-text">+ SAI</span><br>единый ИИ-ассистент</h1>
+    <p class="lead">Центральный «мозг» на сервере, память о жизни и делах, десктопный агент на компьютере и управление через Telegram. Одна система, которая знает контекст и действует за вас.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:34px">
+      <span class="pill"><span class="dot ok"></span> В продакшене</span>
+      <span class="pill">Claude Opus 4.8</span>
+      <span class="pill">7 интеграций</span>
+      <span class="pill">6 устройств</span>
+    </div>
+  </div>
+  <div class="footer-note">Nikolay AI — обзор системы · 2026</div>
+</div>
+
+<!-- 2 · WHAT IT IS -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="kicker">В двух словах</div>
+    <h2 class="section-title">Не чат-бот, а <span class="grad-text">рабочая система</span></h2>
+    <div class="grid g3 animate-stagger">
+      <div class="card accent">
+        <div class="ico" style="font-size:28px">🧠</div>
+        <h4 style="font-size:18px;font-weight:800;margin:12px 0 8px">Помнит</h4>
+        <p style="color:var(--muted);font-size:14px;line-height:1.5">Заметки, контакты, переписки, здоровье, задачи — всё в единой памяти и графе знаний. Отвечает с учётом реального контекста.</p>
+      </div>
+      <div class="card accent">
+        <div class="ico" style="font-size:28px">⚡</div>
+        <h4 style="font-size:18px;font-weight:800;margin:12px 0 8px">Действует</h4>
+        <p style="color:var(--muted);font-size:14px;line-height:1.5">Сортирует почту, готовит сообщения, ставит задачи в YouGile, запускает дела на компьютере — с подтверждением владельца.</p>
+      </div>
+      <div class="card accent">
+        <div class="ico" style="font-size:28px">🔒</div>
+        <h4 style="font-size:18px;font-weight:800;margin:12px 0 8px">Под контролем</h4>
+        <p style="color:var(--muted);font-size:14px;line-height:1.5">Свой сервер, приватная VPN-сеть, все внешние действия — только после одобрения. Удаление данных запрещено на уровне архитектуры.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 3 · ARCHITECTURE / DEVICES -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="kicker">Архитектура и устройства</div>
+    <h2 class="section-title">Мозг на сервере, руки — на всех устройствах</h2>
+    <div class="arch animate-stagger">
+      <div class="node brain">
+        <div class="ico">🖥️</div><div class="nm">VPS «Мозг»</div>
+        <div class="ds">База, API, память, планировщик, бот</div>
+      </div>
+      <div class="node">
+        <div class="ico">💻</div><div class="nm">Ноутбук · SAI</div>
+        <div class="ds">Десктопный агент, действия на ПК</div>
+      </div>
+      <div class="node">
+        <div class="ico">📱</div><div class="nm">Телефон</div>
+        <div class="ds">Telegram + WhatsApp, голос</div>
+      </div>
+      <div class="node">
+        <div class="ico">⌚</div><div class="nm">Garmin</div>
+        <div class="ds">Биометрия: сон, пульс, стресс</div>
+      </div>
+      <div class="node">
+        <div class="ico">🍎</div><div class="nm">Mac</div>
+        <div class="ds">Сборка SAI под macOS</div>
+      </div>
+      <div class="node">
+        <div class="ico">🔗</div><div class="nm">Tailscale VPN</div>
+        <div class="ds">Приватная сеть между устройствами</div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:26px">Все устройства общаются с центральным мозгом через приватную сеть Tailscale. Мозг хранит состояние; агенты выполняют работу там, где она нужна.</p>
+  </div>
+</div>
+
+<!-- 4 · DATA VOLUME -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="kicker">Объём собранных данных</div>
+    <h2 class="section-title">Система уже <span class="grad-text">знает контекст</span></h2>
+    <div class="grid g4 animate-stagger" style="margin-bottom:16px">
+      <div class="card"><div class="num grad-text">20 181</div><div class="lbl">факт в памяти</div><div class="sub">94% с векторным поиском</div></div>
+      <div class="card"><div class="num grad-text">15 598</div><div class="lbl">заметок</div><div class="sub">знания и записи</div></div>
+      <div class="card"><div class="num grad-text">3 550</div><div class="lbl">контактов</div><div class="sub">3 308 с телефоном</div></div>
+      <div class="card"><div class="num grad-text">3 554</div><div class="lbl">письма</div><div class="sub">разобраны и размечены</div></div>
+    </div>
+    <div class="grid g4 animate-stagger">
+      <div class="card"><div class="num">720</div><div class="lbl">сообщений ChatGPT</div></div>
+      <div class="card"><div class="num">137</div><div class="lbl">метрик здоровья</div></div>
+      <div class="card"><div class="num">91</div><div class="lbl">подготовленных действий</div></div>
+      <div class="card"><div class="num">35</div><div class="lbl">напоминаний</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 5 · KNOWLEDGE GRAPH + EMAIL CHARTS -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="kicker">Память и разбор входящих</div>
+    <h2 class="section-title">Граф знаний и категоризация почты</h2>
+    <div class="grid g2" style="align-items:stretch">
+      <div class="chart-wrap">
+        <h4 style="font-weight:700;margin-bottom:6px">Граф знаний</h4>
+        <p style="color:var(--muted);font-size:13px;margin-bottom:14px">Связи между людьми, темами и событиями</p>
+        <div style="height:clamp(200px,32vh,300px)"><canvas id="graphChart"></canvas></div>
+      </div>
+      <div class="chart-wrap">
+        <h4 style="font-weight:700;margin-bottom:6px">3 554 письма по категориям</h4>
+        <p style="color:var(--muted);font-size:13px;margin-bottom:14px">Автоматическая разметка входящих</p>
+        <div style="height:clamp(200px,32vh,300px)"><canvas id="mailChart"></canvas></div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:20px">Из 3 554 писем система выделила <b style="color:var(--text)">1 907 важных</b> и <b style="color:var(--text)">593 требующих действия</b> — остальное отфильтровано как рассылки и шум.</p>
+  </div>
+</div>
+
+<!-- 6 · SERVICES -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="kicker">Подключённые сервисы</div>
+    <h2 class="section-title">7 интеграций <span class="grad-text">в работе</span></h2>
+    <div class="grid g4 animate-stagger">
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>Anthropic Claude</b><span class="dot ok"></span></div><div class="sub">Мозг · Opus 4.8</div></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>Google / Gmail</b><span class="dot ok"></span></div><div class="sub">Почта, календарь, Drive</div></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>Telegram</b><span class="dot ok"></span></div><div class="sub">Основной канал управления</div></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>WhatsApp</b><span class="dot ok"></span></div><div class="sub">Отправка после одобрения</div></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>YouGile</b><span class="dot ok"></span></div><div class="sub">Задачи · проект «Ассистенты»</div></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>Garmin Connect</b><span class="dot warn"></span></div><div class="sub">Биометрия · синхр. по расписанию</div></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>ElevenLabs</b><span class="dot ok"></span></div><div class="sub">Голос: озвучка и распознавание</div></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>Tailscale</b><span class="dot ok"></span></div><div class="sub">Приватная сеть устройств</div></div>
+    </div>
+    <p class="lead" style="margin-top:22px">Все внешние интеграции работают в режиме <b style="color:var(--text)">read-only + подтверждение</b>: система читает и предлагает, но отправляет и меняет только с одобрения владельца.</p>
+    p>
+  </div>
+</div>
+
+<!-- 7 · CAPABILITIES -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="kicker">Что умеет система</div>
+    <h2 class="section-title">От памяти до действий на компьютере</h2>
+    <div class="grid g2 animate-stagger">
+      <div class="feat"><div class="fi">📥</div><div><h4>Разбор входящих</h4><p>Сортирует и размечает почту, выделяет важное и то, что требует действия.</p></div></div>
+      <div class="feat"><div class="fi">✉️</div><div><h4>Подготовка сообщений</h4><p>Готовит черновики в Telegram и WhatsApp, отправляет после одобрения.</p></div></div>
+      <div class="feat"><div class="fi">📋</div><div><h4>Задачи и напоминания</h4><p>Ставит задачи в собственный проект YouGile, ведёт напоминания и планировщик.</p></div></div>
+      <div class="feat"><div class="fi">🗣️</div><div><h4>Голос</h4><p>Принимает и отвечает голосом через ElevenLabs — разговор, а не только текст.</p></div></div>
+      <div class="feat"><div class="fi">💻</div><div><h4>Действия на компьютере</h4><p>SAI запускает приложения, управляет ПК и выполняет делегированные задачи.</p></div></div>
+      <div class="feat"><div class="fi">📊</div><div><h4>Здоровье и проактивность</h4><p>Читает биометрию Garmin, сам формирует утренние сводки и подсказки.</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 8 · SAI DELEGATION -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="kicker">Десктопный агент SAI</div>
+    <h2 class="section-title">Написал в Telegram — <span class="grad-text">сделалось на ПК</span></h2>
+    <div class="grid g4 animate-stagger" style="align-items:stretch;margin-bottom:8px">
+      <div class="card"><div class="num" style="font-size:26px">1</div><div class="lbl">Telegram: «открой браузер, найди…»</div></div>
+      <div class="card"><div class="num" style="font-size:26px">2</div><div class="lbl">Мозг ставит задачу в очередь SAI</div></div>
+      <div class="card"><div class="num" style="font-size:26px">3</div><div class="lbl">SAI выполняет её на компьютере</div></div>
+      <div class="card"><div class="num" style="font-size:26px">4</div><div class="lbl">Результат приходит обратно в чат</div></div>
+    </div>
+    <p class="lead" style="margin-top:18px">Полноценный десктопный агент в фирменном дизайне: свой интерфейс, выбор модели и провайдера, тёмная/светлая тема, режим автономной работы. Telegram и десктоп — <b style="color:var(--text)">разные роли одной системы</b>, которые делегируют задачи друг другу.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:22px">
+      <span class="pill">Windows ✓</span>
+      <span class="pill">macOS ✓</span>
+      <span class="pill">15 задач выполнено через очередь</span>
+    </div>
+  </div>
+</div>
+
+<!-- 9 · WORKS / IN PROGRESS -->
+<div class="slide">
+  <div class="slide-content">
+    <div class="kicker">Честный статус</div>
+    <h2 class="section-title">Что работает и что дорабатываем</h2>
+    <div class="grid g2">
+      <div class="col">
+        <h3><span class="dot ok"></span> Работает стабильно</h3>
+        <ul>
+          <li><span class="mk g">✓</span><span><b>Мозг и память</b> — ответы с контекстом, граф знаний, векторный поиск.</span></li>
+          <li><span class="mk g">✓</span><span><b>Telegram-ассистент</b> — текст, голос, делегирование на ПК.</span></li>
+          <li><span class="mk g">✓</span><span><b>Почта</b> — разбор и категоризация 3 554 писем.</span></li>
+          <li><span class="mk g">✓</span><span><b>Задачи YouGile</b> — свой проект «Ассистенты».</span></li>
+          <li><span class="mk g">✓</span><span><b>SAI desktop</b> — агент на Windows и macOS.</span></li>
+          <li><span class="mk g">✓</span><span><b>WhatsApp</b> — привязан, отправка после одобрения.</span></li>
+        </ul>
+      </div>
+      <div class="col">
+        <h3><span class="dot warn"></span> В доработке</h3>
+        <ul>
+          <li><span class="mk y">◐</span><span><b>Garmin</b> — сброс лимита провайдера, затем синхронизация по расписанию.</span></li>
+          <li><span class="mk y">◐</span><span><b>Голос в SAI</b> — в Telegram уже есть, на десктопе подключаем.</span></li>
+          <li><span class="mk y">◐</span><span><b>Планировщик задач</b> — движок готов, дорабатываем интерфейс.</span></li>
+          <li><span class="mk y">◐</span><span><b>Захват обычных чатов ChatGPT</b> — сейчас берём проекты.</span></li>
+          <li><span class="mk y">◐</span><span><b>«Видит экран» (OCR)</b> — на стадии подключения.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 10 · CLOSING -->
+<div class="slide">
+  <div class="slide-content" style="text-align:center">
+    <div class="kicker" style="justify-content:center">Итог</div>
+    <h2 style="font-size:clamp(30px,5vw,60px)">Готовая основа, которая <span class="grad-text">растёт каждую неделю</span></h2>
+    <p class="lead" style="margin:22px auto 0">Система в продакшене, знает контекст владельца, действует под контролем и расширяется новыми возможностями. Фундамент построен — дальше наращиваем навыки и автономность.</p>
+    <div class="grid g4 animate-stagger" style="margin-top:40px;text-align:left">
+      <div class="card accent"><div class="num grad-text">44K+</div><div class="lbl">единиц данных в памяти</div></div>
+      <div class="card accent"><div class="num grad-text">7</div><div class="lbl">рабочих интеграций</div></div>
+      <div class="card accent"><div class="num grad-text">6</div><div class="lbl">устройств в единой сети</div></div>
+      <div class="card accent"><div class="num grad-text">24/7</div><div class="lbl">на собственном сервере</div></div>
+    </div>
+  </div>
+  <div class="footer-note">Nikolay AI — обзор системы · 2026</div>
+</div>
+
+</div><!-- /.slide-deck -->
+
+<div class="nav-controls">
+  <button class="nav-btn" onclick="prevSlide(event)">←</button>
+  <span class="slide-counter"><span id="current">1</span> / <span id="total">10</span></span>
+  <button class="nav-btn" onclick="nextSlide(event)">→</button>
+</div>
+
+<script>
+let current=1;
+const slides=document.querySelectorAll('.slide');
+const total=slides.length;
+document.getElementById('total').textContent=total;
+let charted=false;
+
+function showSlide(n){
+  if(n<1)n=1;if(n>total)n=total;current=n;
+  slides.forEach((s,i)=>s.classList.toggle('active',i===n-1));
+  document.getElementById('current').textContent=n;
+  document.getElementById('progressBar').style.width=(n/total*100)+'%';
+  if(n===5&&!charted){drawCharts();charted=true;}
+}
+function nextSlide(e){if(e)e.stopPropagation();showSlide(current+1);}
+function prevSlide(e){if(e)e.stopPropagation();showSlide(current-1);}
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();nextSlide();}
+  if(e.key==='ArrowLeft'){e.preventDefault();prevSlide();}
+});
+document.addEventListener('click',e=>{if(!e.target.closest('.nav-controls'))nextSlide();});
+
+function drawCharts(){
+  Chart.defaults.font.family="'Inter',sans-serif";
+  new Chart(document.getElementById('graphChart'),{
+    type:'bar',
+    data:{labels:['Узлы','Связи'],datasets:[{
+      data:[7062,8803],
+      backgroundColor:['rgba(229,72,77,.85)','rgba(255,107,111,.55)'],
+      borderColor:'#e5484d',borderWidth:1,borderRadius:10,barPercentage:.6
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{grid:{display:false},ticks:{color:'#9aa0ab',font:{size:13,weight:'600'}}},
+      y:{grid:{color:'rgba(255,255,255,.05)'},ticks:{color:'#6b7078'},beginAtZero:true}}}
+  });
+  new Chart(document.getElementById('mailChart'),{
+    type:'doughnut',
+    data:{labels:['Важное','Рассылки','Требует действия','Мусор'],datasets:[{
+      data:[1907,1041,593,13],
+      backgroundColor:['#e5484d','#4a4d55','#ff6b6f','#26282e'],
+      borderColor:'#141519',borderWidth:3
+    }]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'62%',
+      plugins:{legend:{position:'right',labels:{color:'#9aa0ab',font:{size:12},padding:12,boxWidth:12,usePointStyle:true}}}}
+  });
+}
+showSlide(1);
+</script>
+</body>
+</html>

@@ -130,6 +130,15 @@ export const TOOLS: ToolDef[] = [
   {
     type: "function",
     function: {
+      name: "see_screen",
+      description:
+        "Посмотреть на экран прямо сейчас: делает скриншот и передаёт само изображение тебе на анализ (зрение). Используй, чтобы понять, что на экране, прочитать текст, найти элемент интерфейса или решить, куда кликать.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "http_get",
       description: "Загрузить содержимое URL (текст/HTML/JSON). Для чтения веб-страниц и API.",
       parameters: {
@@ -359,6 +368,10 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
         return "открыто";
       case "screenshot":
         return `скриншот сохранён: ${await invoke<string>("screenshot")}`;
+      case "see_screen":
+        // On the Anthropic provider this is intercepted and the image is fed to vision.
+        // On the bridge (text tool results) we can only hand back the path for now.
+        return `экран захвачен: ${await invoke<string>("screenshot")} (анализ зрением доступен на провайдере «Claude напрямую»)`;
       case "http_get": {
         const res = await fetch(String(args.url ?? ""));
         const text = await res.text();
@@ -417,13 +430,30 @@ export type AgentCallbacks = {
   signal?: AbortSignal;
 };
 
+/** Attach images (data/URL) to the last user message as OpenAI image_url parts (vision). */
+function attachImages(messages: AgentMessage[], images: string[]): void {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === "user") {
+      const text = typeof messages[i].content === "string" ? (messages[i].content as string) : "";
+      const parts = [
+        { type: "text", text },
+        ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+      ];
+      (messages[i] as unknown as { content: unknown }).content = parts;
+      return;
+    }
+  }
+}
+
 /** Run the agent to completion. `history` is the prior conversation (system/user/assistant). */
 export async function runAgent(
   settings: BrainSettings,
   history: AgentMessage[],
   cb: AgentCallbacks,
+  images?: string[],
 ): Promise<void> {
   const messages: AgentMessage[] = [...history];
+  if (images && images.length) attachImages(messages, images);
 
   for (let step = 0; step < MAX_STEPS; step += 1) {
     if (cb.signal?.aborted) return;

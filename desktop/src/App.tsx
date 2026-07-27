@@ -6,7 +6,9 @@ import { CommandPalette, type Command } from "./CommandPalette";
 import {
   IconChevron,
   IconCopy,
+  IconEye,
   IconMaximize,
+  IconMic,
   IconMinimize,
   IconPaperclip,
   IconPlus,
@@ -18,6 +20,7 @@ import {
   IconTasks,
   IconTrash,
   IconUser,
+  IconVolume,
   IconWand,
   IconX,
 } from "./icons";
@@ -44,11 +47,32 @@ import {
   titleFrom,
 } from "./store";
 import { Markdown } from "./Markdown";
+import { FEMALE_VOICES, MALE_VOICES, voiceName } from "./voices";
 import { TasksPanel } from "./Tasks";
 import { runAgent } from "./agent";
 import { type ImageInput, runAnthropicAgent, streamAnthropicChat } from "./anthropic";
+import { type HandsFreeHandle, speak, startHandsFree, stopSpeaking, transcribe } from "./voice";
 
 const appWindow = getCurrentWindow();
+
+// Voice-mode UI states (single voice button). listening → hearing (you talk) → recognizing
+// → thinking (brain) → speaking (reply), then back to listening.
+type VoicePhase = "listening" | "hearing" | "recognizing" | "thinking" | "speaking";
+
+function voicePhaseLabel(p: VoicePhase): string {
+  switch (p) {
+    case "hearing":
+      return "Говорите…";
+    case "recognizing":
+      return "Распознаю…";
+    case "thinking":
+      return "Думаю…";
+    case "speaking":
+      return "Отвечаю…";
+    default:
+      return "Слушаю";
+  }
+}
 
 export function App() {
   const [conversations, setConversations] = useState<Conversation[]>(() => {
@@ -64,15 +88,26 @@ export function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
   const [queueOn, setQueueOn] = useState<boolean>(() => localStorage.getItem("sai.queue") === "1");
-  const [agentMode, setAgentMode] = useState(false);
-  const [openMenu, setOpenMenu] = useState<null | "model" | "provider">(null);
+  // Agent mode is on by default (SAI acts on the machine); persisted so it stays on.
+  const [agentMode, setAgentMode] = useState<boolean>(() => localStorage.getItem("sai.agent") !== "0");
+  const [openMenu, setOpenMenu] = useState<null | "model" | "provider" | "voice">(null);
   const [models, setModels] = useState<string[]>(ANTHROPIC_MODELS);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
   const [autostart, setAutostart] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>("listening");
+  // Vision mode: auto-attach a live screenshot to every turn so SAI sees the current screen.
+  const [visionMode, setVisionMode] = useState<boolean>(() => localStorage.getItem("sai.vision") === "1");
   const [approval, setApproval] = useState<{ summary: string; resolve: (ok: boolean) => void } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const approveAllRef = useRef(false);
+  const hfRef = useRef<HandsFreeHandle | null>(null);
+  const busyRef = useRef(false);
+  const hfProcessingRef = useRef(false);
+  const speakingRef = useRef(false);
+  const voiceModeRef = useRef(false);
+  const visionModeRef = useRef(false);
   const queueBusyRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -87,6 +122,27 @@ export function App() {
   }, [activeId, conversations]);
 
   useEffect(() => saveConversations(conversations), [conversations]);
+
+  // Mirror `busy`/`voiceMode` into refs so voice callbacks read live values, not stale closures.
+  useEffect(() => {
+    busyRef.current = busy;
+    if (voiceModeRef.current && busy) setVoicePhase("thinking");
+  }, [busy]);
+  useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
+  useEffect(() => {
+    visionModeRef.current = visionMode;
+    localStorage.setItem("sai.vision", visionMode ? "1" : "0");
+  }, [visionMode]);
+
+  // Persist agent mode so it stays on across restarts.
+  useEffect(() => {
+    localStorage.setItem("sai.agent", agentMode ? "1" : "0");
+  }, [agentMode]);
+
+  // Tear down hands-free listening if the component unmounts.
+  useEffect(() => () => hfRef.current?.stop(), []);
 
   useEffect(() => {
     void invoke<boolean>("get_autostart").then(setAutostart).catch(() => {});
@@ -116,6 +172,55 @@ export function App() {
       setAutostart(next);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // Single voice mode: tap once to start a hands-free conversation. SAI listens, auto-sends
+  // when you pause, and always speaks its reply. Tap again to stop. Capture pauses while the
+  // brain is thinking or SAI is speaking, so it never records over itself.
+  async function toggleVoice() {
+    if (voiceMode) {
+      hfRef.current?.stop();
+      hfRef.current = null;
+      stopSpeaking();
+      speakingRef.current = false;
+      setVoiceMode(false);
+      setVoicePhase("listening");
+      return;
+    }
+    const key = settings.elevenKey?.trim();
+    if (!key) {
+      setError("Добавь ключ ElevenLabs в настройках, чтобы включить голосовой режим.");
+      setShowSettings(true);
+      return;
+    }
+    try {
+      hfRef.current = await startHandsFree({
+        isBusy: () => busyRef.current || hfProcessingRef.current || speakingRef.current,
+        onState: (s) => {
+          if (busyRef.current || hfProcessingRef.current || speakingRef.current) return;
+          setVoicePhase(s === "recording" ? "hearing" : "listening");
+        },
+        onSegment: async (blob) => {
+          hfProcessingRef.current = true;
+          setVoicePhase("recognizing");
+          try {
+            const text = (await transcribe(blob, key)).trim();
+            if (text) await sendText(text);
+            else setVoicePhase("listening");
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+            setVoicePhase("listening");
+          } finally {
+            hfProcessingRef.current = false;
+          }
+        },
+      });
+      setVoiceMode(true);
+      setVoicePhase("listening");
+      setError(null);
+    } catch {
+      setError("Нет доступа к микрофону.");
     }
   }
 
@@ -182,9 +287,19 @@ export function App() {
     setOpenMenu(null);
   }
 
+  function chooseVoice(id: string) {
+    persistSettings({ ...settings, elevenVoice: id });
+    setOpenMenu(null);
+  }
+
   function toggleQueue(on: boolean) {
     setQueueOn(on);
     localStorage.setItem("sai.queue", on ? "1" : "0");
+  }
+
+  function toggleVision() {
+    setVisionMode((v) => !v);
+    setError(null);
   }
 
   // Execute one queued task headlessly (no user present → auto-approve tool calls).
@@ -260,6 +375,20 @@ export function App() {
     if ((!text && !(images && images.length)) || busy || !active) return;
     setError(null);
 
+    // Vision mode: attach a live screenshot to THIS request so SAI sees the current screen.
+    // Sent to the model only — not stored in history (a base64 PNG per turn would blow the
+    // localStorage quota). User-attached images are still stored/displayed as before.
+    let sendImgs = images ?? [];
+    if (visionModeRef.current) {
+      try {
+        const path = await invoke<string>("screenshot");
+        const b64 = await invoke<string>("read_file_base64", { path });
+        sendImgs = [...sendImgs, `data:image/png;base64,${b64}`];
+      } catch {
+        // screen capture failed — send without it
+      }
+    }
+
     const userMsg: StoredMessage = {
       id: Date.now(),
       role: "user",
@@ -297,13 +426,16 @@ export function App() {
           },
         });
       });
-    const append = (delta: string) =>
+    let full = "";
+    const append = (delta: string) => {
+      full += delta;
       patchActive((c) => ({
         ...c,
         messages: c.messages.map((m) =>
           m.id === assistantMsg.id ? { ...m, content: m.content + delta } : m,
         ),
       }));
+    };
 
     try {
       if (agentMode) {
@@ -324,32 +456,50 @@ export function App() {
           signal: controller.signal,
         };
         if (settings.provider === "anthropic")
-          await runAnthropicAgent(settings, agentHistory, cbs, toImageInputs(images));
-        else await runAgent(settings, agentHistory, cbs);
+          await runAnthropicAgent(settings, agentHistory, cbs, toImageInputs(sendImgs));
+        else await runAgent(settings, agentHistory, cbs, sendImgs);
       } else if (settings.provider === "anthropic") {
         const agentHistory: AgentMessage[] = [
           ...(system ? [{ role: "system" as const, content: system }] : []),
           ...history.map(({ role, content }) => ({ role, content })),
         ];
-        await streamAnthropicChat(settings, agentHistory, append, controller.signal, toImageInputs(images));
+        await streamAnthropicChat(settings, agentHistory, append, controller.signal, toImageInputs(sendImgs));
       } else {
         const payload: ChatMessage[] = [
           ...(system ? [{ role: "system" as const, content: system }] : []),
           ...history.map(({ role, content }) => ({ role, content })),
         ];
-        await streamChat(settings, payload, append, controller.signal, images);
+        await streamChat(settings, payload, append, controller.signal, sendImgs);
       }
     } catch (e) {
       if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
       abortRef.current = null;
+      const key = settings.elevenKey?.trim();
+      const shouldSpeak =
+        !!key && full.trim().length > 0 && !controller.signal.aborted &&
+        (voiceModeRef.current || settings.speakReplies === true);
+      if (shouldSpeak) {
+        speakingRef.current = true;
+        if (voiceModeRef.current) setVoicePhase("speaking");
+        void speak(full, key as string, settings.elevenVoice || "JBFqnCBsd6RMkjVDRZzb")
+          .catch(() => {})
+          .finally(() => {
+            speakingRef.current = false;
+            if (voiceModeRef.current) setVoicePhase("listening");
+          });
+      } else if (voiceModeRef.current) {
+        setVoicePhase("listening");
+      }
     }
   }
 
   function stop() {
     abortRef.current?.abort();
     approval?.resolve(false); // release any pending approval so the loop unwinds
+    stopSpeaking();
+    speakingRef.current = false;
     setBusy(false);
   }
 
@@ -598,6 +748,42 @@ export function App() {
               </div>
             )}
           </div>
+          <div className="ctrl-wrap">
+            <button
+              className={`ctrl-select ${openMenu === "voice" ? "open" : ""}`}
+              onClick={() => setOpenMenu((m) => (m === "voice" ? null : "voice"))}
+            >
+              <span className="ctrl-label">Голос</span>
+              <span className="ctrl-value">{voiceName(settings.elevenVoice)}</span>
+              <IconChevron size={13} />
+            </button>
+            {openMenu === "voice" && (
+              <div className="ctrl-menu voice-menu">
+                <div className="ctrl-group">Женские</div>
+                {FEMALE_VOICES.map((v) => (
+                  <button
+                    key={v.id}
+                    className={`ctrl-opt ${v.id === settings.elevenVoice ? "sel" : ""}`}
+                    onClick={() => chooseVoice(v.id)}
+                  >
+                    <span>{v.name}</span>
+                    <span className="ctrl-opt-desc">{v.desc}</span>
+                  </button>
+                ))}
+                <div className="ctrl-group">Мужские</div>
+                {MALE_VOICES.map((v) => (
+                  <button
+                    key={v.id}
+                    className={`ctrl-opt ${v.id === settings.elevenVoice ? "sel" : ""}`}
+                    onClick={() => chooseVoice(v.id)}
+                  >
+                    <span>{v.name}</span>
+                    <span className="ctrl-opt-desc">{v.desc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="spacer" />
           {settings.dangerMode && (
             <span className="danger-flag" title="Разрешения отключены — асик действует без подтверждений">
@@ -623,6 +809,8 @@ export function App() {
                 settings={settings}
                 onSave={persistSettings}
                 onClose={() => setShowSettings(false)}
+                autostart={autostart}
+                onToggleAutostart={toggleAutostart}
               />
             </div>
           </div>
@@ -790,6 +978,39 @@ export function App() {
             >
               <IconWand size={16} /> Агент
             </button>
+            <button
+              className={`tool-btn voice-btn ${voiceMode ? `on ${voicePhase}` : ""}`}
+              title={
+                voiceMode
+                  ? "Голосовой режим включён — говори, SAI слушает и отвечает голосом. Нажми, чтобы выключить."
+                  : "Голосовой режим: говори — SAI слушает и отвечает голосом (без кнопок)"
+              }
+              onClick={() => void toggleVoice()}
+            >
+              <IconMic size={16} /> {voiceMode ? voicePhaseLabel(voicePhase) : "Голос"}
+            </button>
+            <button
+              className={`tool-btn ${settings.speakReplies ? "on" : ""}`}
+              title={
+                settings.speakReplies
+                  ? "Ответы озвучиваются голосом — нажми, чтобы выключить"
+                  : "Озвучивать письменные ответы голосом (пишешь текстом — SAI отвечает текстом и голосом)"
+              }
+              onClick={() => persistSettings({ ...settings, speakReplies: !settings.speakReplies })}
+            >
+              <IconVolume size={16} /> Озвучка
+            </button>
+            <button
+              className={`tool-btn ${visionMode ? "on" : ""}`}
+              title={
+                visionMode
+                  ? "Зрение включено — SAI видит твой экран в каждой реплике"
+                  : "Зрение: SAI видит экран (живой снимок прикладывается к каждому сообщению)"
+              }
+              onClick={toggleVision}
+            >
+              <IconEye size={16} /> Зрение
+            </button>
             <div className="spacer" />
             {busy ? (
               <button className="send stop" onClick={stop}>
@@ -838,6 +1059,8 @@ function SettingsPanel(props: {
   settings: BrainSettings;
   onSave: (s: BrainSettings) => void;
   onClose: () => void;
+  autostart: boolean;
+  onToggleAutostart: () => void;
 }) {
   const [draft, setDraft] = useState(props.settings);
   const [models, setModels] = useState<string[]>([]);
@@ -914,6 +1137,53 @@ function SettingsPanel(props: {
           <option value="system">Как в системе</option>
         </select>
       </label>
+      <label>
+        Ключ ElevenLabs (голос: микрофон + озвучка)
+        <input
+          type="password"
+          value={draft.elevenKey ?? ""}
+          onChange={(e) => setDraft({ ...draft, elevenKey: e.target.value })}
+          placeholder="xi-api-key…"
+        />
+      </label>
+      <label>
+        Голос (ElevenLabs voice id)
+        <input
+          value={draft.elevenVoice ?? ""}
+          onChange={(e) => setDraft({ ...draft, elevenVoice: e.target.value })}
+          placeholder="JBFqnCBsd6RMkjVDRZzb"
+        />
+      </label>
+
+      <div className="danger-row">
+        <div className="danger-text">
+          <div className="danger-title">Озвучивать ответы в текстовом режиме</div>
+          <div className="danger-desc">В голосовом режиме ответы озвучиваются всегда.</div>
+        </div>
+        <button
+          className={`switch ${draft.speakReplies ? "on" : ""}`}
+          role="switch"
+          aria-checked={!!draft.speakReplies}
+          onClick={() => setDraft({ ...draft, speakReplies: !draft.speakReplies })}
+        >
+          <span className="knob" />
+        </button>
+      </div>
+
+      <div className="danger-row">
+        <div className="danger-text">
+          <div className="danger-title">Запускать с Windows</div>
+          <div className="danger-desc">SAI стартует в трее при входе в систему — всегда под рукой.</div>
+        </div>
+        <button
+          className={`switch ${props.autostart ? "on" : ""}`}
+          role="switch"
+          aria-checked={props.autostart}
+          onClick={() => props.onToggleAutostart()}
+        >
+          <span className="knob" />
+        </button>
+      </div>
 
       <div className="danger-row">
         <div className="danger-text">
