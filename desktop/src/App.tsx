@@ -54,6 +54,7 @@ import { TasksPanel } from "./Tasks";
 import { runAgent } from "./agent";
 import { type ImageInput, runAnthropicAgent, streamAnthropicChat } from "./anthropic";
 import { type HandsFreeHandle, speak, startHandsFree, stopSpeaking, transcribe } from "./voice";
+import { type UpdateInfo, checkForUpdate } from "./updater";
 
 const appWindow = getCurrentWindow();
 
@@ -97,6 +98,8 @@ export function App() {
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<UsageToday | null>(null);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [updating, setUpdating] = useState(false);
   const [autostart, setAutostart] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("listening");
@@ -150,6 +153,22 @@ export function App() {
   useEffect(() => {
     void invoke<boolean>("get_autostart").then(setAutostart).catch(() => {});
   }, []);
+
+  // Check the self-hosted updater once on launch (silent if nothing new / offline).
+  useEffect(() => {
+    void checkForUpdate().then(setUpdate);
+  }, []);
+
+  async function installUpdate() {
+    if (!update) return;
+    setUpdating(true);
+    try {
+      await update.install(); // downloads, verifies signature, installs, relaunches
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setUpdating(false);
+    }
+  }
 
   // Provisioning: if ~/.sai-bootstrap.json exists, merge it into settings once (lets the
   // brain endpoint/token/model be configured for the user without touching the UI).
@@ -823,6 +842,19 @@ export function App() {
             title={online === null ? "Проверка связи" : online ? "Мозг на связи" : "Нет связи с мозгом"}
           />
         </div>
+
+        {update && (
+          <div className="update-bar">
+            <span>🚀 Доступно обновление SAI {update.version}</span>
+            <div className="spacer" />
+            <button className="update-btn" onClick={() => void installUpdate()} disabled={updating}>
+              {updating ? "Обновление…" : "Обновить и перезапустить"}
+            </button>
+            <button className="update-dismiss" onClick={() => setUpdate(null)} title="Позже">
+              <IconX size={14} />
+            </button>
+          </div>
+        )}
 
         {showSettings && (
           <div className="modal-overlay" onClick={() => setShowSettings(false)}>

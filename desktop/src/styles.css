@@ -1466,6 +1466,41 @@ button {
   50% { box-shadow: 0 0 0 6px var(--accent-soft); }
 }
 
+/* Self-hosted update banner */
+.update-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 16px 0;
+  padding: 10px 14px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.update-btn {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.update-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.update-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+}
+
 /* Control-strip chips: token spend + vision indicator */
 .usage-chip {
   font-size: 12px;
