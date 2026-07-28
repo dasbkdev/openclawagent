@@ -97,7 +97,10 @@ export async function fetchUsage(settings: BrainSettings): Promise<UsageToday | 
 export function loadSettings(): BrainSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    // Security: the desktop routes everything through the brain bridge. The direct-Anthropic
+    // path (API key in the browser) is removed, so force provider back to "bridge" even if an
+    // older setting selected "anthropic".
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw), provider: "bridge" };
   } catch {
     // ignore corrupt settings — fall back to defaults
   }

@@ -26,7 +26,6 @@ import {
 } from "./icons";
 import {
   type AgentMessage,
-  ANTHROPIC_MODELS,
   type BrainSettings,
   type ChatMessage,
   claimNextTask,
@@ -52,7 +51,6 @@ import { Markdown } from "./Markdown";
 import { FEMALE_VOICES, MALE_VOICES, voiceName } from "./voices";
 import { TasksPanel } from "./Tasks";
 import { runAgent } from "./agent";
-import { type ImageInput, runAnthropicAgent, streamAnthropicChat } from "./anthropic";
 import { type HandsFreeHandle, speak, startHandsFree, stopSpeaking, transcribe } from "./voice";
 import { type UpdateInfo, checkForUpdate } from "./updater";
 
@@ -93,8 +91,8 @@ export function App() {
   const [queueOn, setQueueOn] = useState<boolean>(() => localStorage.getItem("sai.queue") === "1");
   // Agent mode is on by default (SAI acts on the machine); persisted so it stays on.
   const [agentMode, setAgentMode] = useState<boolean>(() => localStorage.getItem("sai.agent") !== "0");
-  const [openMenu, setOpenMenu] = useState<null | "model" | "provider" | "voice">(null);
-  const [models, setModels] = useState<string[]>(ANTHROPIC_MODELS);
+  const [openMenu, setOpenMenu] = useState<null | "model" | "voice">(null);
+  const [models, setModels] = useState<string[]>([]);
   const [settings, setSettings] = useState<BrainSettings>(loadSettings);
   const [online, setOnline] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<UsageToday | null>(null);
@@ -315,12 +313,6 @@ export function App() {
     setOpenMenu(null);
   }
 
-  function chooseProvider(provider: BrainSettings["provider"]) {
-    const model = provider === "anthropic" ? "claude-opus-4-8" : "nikolay-assistant";
-    persistSettings({ ...settings, provider, model });
-    setOpenMenu(null);
-  }
-
   function chooseVoice(id: string) {
     persistSettings({ ...settings, elevenVoice: id });
     setOpenMenu(null);
@@ -360,8 +352,7 @@ export function App() {
       { role: "user", content: task.instruction },
     ];
     try {
-      if (settings.provider === "anthropic") await runAnthropicAgent(settings, history, cb);
-      else await runAgent(settings, history, cb);
+      await runAgent(settings, history, cb);
       await reportTaskResult(settings, task.id, "done", out.trim() || "готово");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -489,15 +480,7 @@ export function App() {
           onApprove,
           signal: controller.signal,
         };
-        if (settings.provider === "anthropic")
-          await runAnthropicAgent(settings, agentHistory, cbs, toImageInputs(sendImgs));
-        else await runAgent(settings, agentHistory, cbs, sendImgs);
-      } else if (settings.provider === "anthropic") {
-        const agentHistory: AgentMessage[] = [
-          ...(system ? [{ role: "system" as const, content: system }] : []),
-          ...history.map(({ role, content }) => ({ role, content })),
-        ];
-        await streamAnthropicChat(settings, agentHistory, append, controller.signal, toImageInputs(sendImgs));
+        await runAgent(settings, agentHistory, cbs, sendImgs);
       } else {
         const payload: ChatMessage[] = [
           ...(system ? [{ role: "system" as const, content: system }] : []),
@@ -620,19 +603,7 @@ export function App() {
       },
       { id: "shot", label: "Скриншот экрана", hint: "сохранить и открыть PNG", run: () => void takeScreenshot() },
       { id: "tasks", label: "Задачи и очередь", hint: "фоновое выполнение", run: () => setShowTasks(true) },
-      { id: "settings", label: "Настройки", hint: "провайдер, модель, ключ", run: () => setShowSettings(true) },
-      {
-        id: "provider",
-        label:
-          settings.provider === "anthropic"
-            ? "Провайдер → Мозг SAI (мост)"
-            : "Провайдер → Claude напрямую",
-        run: () =>
-          persistSettings({
-            ...settings,
-            provider: settings.provider === "anthropic" ? "bridge" : "anthropic",
-          }),
-      },
+      { id: "settings", label: "Настройки", hint: "модель, токен, голос", run: () => setShowSettings(true) },
       {
         id: "autostart",
         label: autostart ? "Автозапуск с системой: выключить" : "Автозапуск с системой: включить",
@@ -753,32 +724,6 @@ export function App() {
                     {m}
                   </button>
                 ))}
-              </div>
-            )}
-          </div>
-          <div className="ctrl-wrap">
-            <button
-              className={`ctrl-select ${openMenu === "provider" ? "open" : ""}`}
-              onClick={() => setOpenMenu((m) => (m === "provider" ? null : "provider"))}
-            >
-              <span className="ctrl-label">Провайдер</span>
-              <span className="ctrl-value">{settings.provider === "anthropic" ? "Claude напрямую" : "Мозг SAI"}</span>
-              <IconChevron size={13} />
-            </button>
-            {openMenu === "provider" && (
-              <div className="ctrl-menu">
-                <button
-                  className={`ctrl-opt ${settings.provider === "bridge" ? "sel" : ""}`}
-                  onClick={() => chooseProvider("bridge")}
-                >
-                  Мозг SAI (мост)
-                </button>
-                <button
-                  className={`ctrl-opt ${settings.provider === "anthropic" ? "sel" : ""}`}
-                  onClick={() => chooseProvider("anthropic")}
-                >
-                  Claude напрямую
-                </button>
               </div>
             )}
           </div>
@@ -1112,16 +1057,6 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-/** "data:image/png;base64,AAAA" -> { mediaType, dataB64 } for the Anthropic vision API. */
-function dataUrlToImageInput(url: string): ImageInput | null {
-  const m = /^data:([^;]+);base64,(.*)$/s.exec(url);
-  return m ? { mediaType: m[1], dataB64: m[2] } : null;
-}
-
-function toImageInputs(urls?: string[]): ImageInput[] {
-  return (urls ?? []).map(dataUrlToImageInput).filter((x): x is ImageInput => x !== null);
-}
-
 function SettingsPanel(props: {
   settings: BrainSettings;
   onSave: (s: BrainSettings) => void;
@@ -1141,25 +1076,13 @@ function SettingsPanel(props: {
   return (
     <div className="settings">
       <label>
-        Провайдер
-        <select
-          value={draft.provider}
-          onChange={(e) => setDraft({ ...draft, provider: e.target.value as BrainSettings["provider"] })}
-        >
-          <option value="anthropic">Claude напрямую (Anthropic API)</option>
-          <option value="bridge">Мозг SAI (мост control-plane / nikolay_ai)</option>
-        </select>
+        Адрес мозга
+        <input
+          value={draft.endpoint}
+          onChange={(e) => setDraft({ ...draft, endpoint: e.target.value })}
+          placeholder="https://main-server.taild4d010.ts.net"
+        />
       </label>
-      {draft.provider === "bridge" && (
-        <label>
-          Адрес мозга
-          <input
-            value={draft.endpoint}
-            onChange={(e) => setDraft({ ...draft, endpoint: e.target.value })}
-            placeholder="http://127.0.0.1:3099"
-          />
-        </label>
-      )}
       <label>
         Модель
         {models.length ? (
@@ -1176,12 +1099,12 @@ function SettingsPanel(props: {
         )}
       </label>
       <label>
-        {draft.provider === "anthropic" ? "Anthropic API-ключ" : "API-ключ моста"}
+        Токен моста
         <input
           type="password"
           value={draft.apiKey}
           onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
-          placeholder={draft.provider === "anthropic" ? "sk-ant-…" : "Bearer-токен моста"}
+          placeholder="Bearer-токен мозга"
         />
       </label>
       <label>
