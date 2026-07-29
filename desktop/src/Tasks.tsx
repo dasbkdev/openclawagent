@@ -10,6 +10,12 @@ const STATUS_RU: Record<string, string> = {
   canceled: "отменено",
 };
 
+const RECUR_RU: Record<string, string> = {
+  daily: "каждый день",
+  weekdays: "по будням",
+  weekly: "раз в неделю",
+};
+
 // Task queue view: toggle background execution, enqueue new tasks, watch statuses.
 export function TasksPanel({ settings, queueOn, onToggleQueue, onClose }: {
   settings: BrainSettings;
@@ -20,6 +26,7 @@ export function TasksPanel({ settings, queueOn, onToggleQueue, onClose }: {
   const [tasks, setTasks] = useState<DesktopTask[]>([]);
   const [text, setText] = useState("");
   const [when, setWhen] = useState(""); // datetime-local value for scheduling
+  const [recur, setRecur] = useState(""); // "" | daily | weekdays | weekly
 
   useEffect(() => {
     let alive = true;
@@ -36,10 +43,17 @@ export function TasksPanel({ settings, queueOn, onToggleQueue, onClose }: {
     const t = text.trim();
     if (!t) return;
     const runAt = schedule && when ? new Date(when).toISOString() : undefined;
+    const recurrence = schedule && recur ? recur : undefined;
     setText("");
-    if (schedule) setWhen("");
+    if (schedule) {
+      setWhen("");
+      setRecur("");
+    }
     try {
-      await createTask(settings, t, runAt ? { runAt } : {});
+      await createTask(settings, t, {
+        ...(runAt ? { runAt } : {}),
+        ...(recurrence ? { recurrence } : {}),
+      });
     } catch {
       // ignore — list refresh will reflect reality
     }
@@ -92,6 +106,12 @@ export function TasksPanel({ settings, queueOn, onToggleQueue, onClose }: {
               onChange={(e) => setWhen(e.target.value)}
               title="Когда выполнить задачу"
             />
+            <select value={recur} onChange={(e) => setRecur(e.target.value)} title="Повтор">
+              <option value="">разово</option>
+              <option value="daily">каждый день</option>
+              <option value="weekdays">по будням</option>
+              <option value="weekly">раз в неделю</option>
+            </select>
             <button
               className="send ghost"
               onClick={() => void add(true)}
@@ -112,6 +132,9 @@ export function TasksPanel({ settings, queueOn, onToggleQueue, onClose }: {
                   {t.result && <div className="task-result">{t.result}</div>}
                   {t.run_at && (
                     <div className="task-src">⏰ {new Date(t.run_at).toLocaleString("ru-RU")}</div>
+                  )}
+                  {t.recurrence && (
+                    <div className="task-src">🔁 {RECUR_RU[t.recurrence] ?? t.recurrence}</div>
                   )}
                   {t.source === "telegram" && <div className="task-src">из Telegram</div>}
                 </div>

@@ -154,6 +154,7 @@ export type DesktopTask = {
   result: string;
   origin_chat_id: string | null;
   run_at: string | null;
+  recurrence: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -171,12 +172,17 @@ function taskHeaders(settings: BrainSettings): Record<string, string> {
 export async function createTask(
   settings: BrainSettings,
   instruction: string,
-  opts: { source?: string; runAt?: string } = {},
+  opts: { source?: string; runAt?: string; recurrence?: string } = {},
 ): Promise<DesktopTask> {
   const res = await fetch(taskUrl(settings, "/desktop/tasks"), {
     method: "POST",
     headers: taskHeaders(settings),
-    body: JSON.stringify({ instruction, source: opts.source ?? "sai", run_at: opts.runAt ?? null }),
+    body: JSON.stringify({
+      instruction,
+      source: opts.source ?? "sai",
+      run_at: opts.runAt ?? null,
+      recurrence: opts.recurrence ?? null,
+    }),
   });
   if (!res.ok) throw new Error(`Очередь ответила ${res.status}`);
   return res.json();

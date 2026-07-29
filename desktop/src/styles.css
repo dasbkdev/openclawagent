@@ -1594,6 +1594,18 @@ button {
   outline: none;
   border-color: var(--accent-line);
 }
+.task-schedule select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  font: inherit;
+}
+.task-schedule select:focus {
+  outline: none;
+  border-color: var(--accent-line);
+}
 .send.ghost {
   background: transparent;
   border: 1px solid var(--border-strong);
