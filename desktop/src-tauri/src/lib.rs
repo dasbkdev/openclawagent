@@ -433,6 +433,24 @@ fn active_window() -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+// Virtual-screen size as "WIDTHxHEIGHT" — lets the agent map what it sees to click coords.
+#[tauri::command]
+fn screen_size() -> Result<String, String> {
+    let out = if cfg!(target_os = "windows") {
+        Command::new("powershell.exe").args([
+            "-NoProfile",
+            "-Command",
+            &format!("{PS_UTF8}Add-Type -AssemblyName System.Windows.Forms; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; \"$($b.Width)x$($b.Height)\""),
+        ]).output()
+    } else if cfg!(target_os = "macos") {
+        Command::new("bash").args(["-lc", "system_profiler SPDisplaysDataType | awk '/Resolution/{print $2\"x\"$4; exit}'"]).output()
+    } else {
+        Command::new("bash").args(["-lc", "xrandr | awk '/\\*/{print $1; exit}'"]).output()
+    };
+    out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .map_err(|e| e.to_string())
+}
+
 // Launch an application by name or path.
 #[tauri::command]
 fn open_app(name: String) -> Result<(), String> {
@@ -506,6 +524,7 @@ pub fn run() {
             active_window,
             open_app,
             close_app,
+            screen_size,
             set_autostart,
             get_autostart
         ])
@@ -515,6 +534,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()

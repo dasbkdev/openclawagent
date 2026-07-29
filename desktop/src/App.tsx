@@ -31,6 +31,7 @@ import {
   claimNextTask,
   type DesktopTask,
   fetchModels,
+  fetchNotifications,
   fetchUsage,
   loadSettings,
   ping,
@@ -53,6 +54,7 @@ import { TasksPanel } from "./Tasks";
 import { runAgent } from "./agent";
 import { type HandsFreeHandle, speak, startHandsFree, stopSpeaking, transcribe } from "./voice";
 import { type UpdateInfo, checkForUpdate } from "./updater";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
 const appWindow = getCurrentWindow();
 
@@ -286,6 +288,35 @@ export function App() {
     };
   }, [settings]);
 
+  // Proactive notifications: poll the brain for recently-due reminders and show them as native
+  // OS notifications. Dedupe shown ids in localStorage so each reminder pops once.
+  useEffect(() => {
+    let alive = true;
+    const KEY = "sai.notified";
+    const poll = async () => {
+      const list = await fetchNotifications(settings);
+      if (!alive || list.length === 0) return;
+      let granted = await isPermissionGranted();
+      if (!granted) granted = (await requestPermission()) === "granted";
+      if (!granted) return;
+      const shown = new Set<number>(JSON.parse(localStorage.getItem(KEY) || "[]"));
+      let changed = false;
+      for (const n of list) {
+        if (shown.has(n.id)) continue;
+        shown.add(n.id);
+        changed = true;
+        sendNotification({ title: n.title || "Напоминание", body: n.body || "" });
+      }
+      if (changed) localStorage.setItem(KEY, JSON.stringify([...shown].slice(-200)));
+    };
+    void poll();
+    const t = setInterval(() => void poll(), 45000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [settings]);
+
   useEffect(() => {
     let alive = true;
     void fetchModels(settings).then((m) => alive && m.length && setModels(m));
@@ -469,7 +500,11 @@ export function App() {
           "У тебя есть полный доступ к компьютеру пользователя: терминал, файлы, поиск, скриншот, " +
           "веб, а также клавиатура, мышь, буфер обмена, список окон/процессов и запуск/закрытие " +
           "приложений. Действуй как агент: выполняй задачи до конца, разрушительные действия " +
-          "пользователь подтверждает сам. В конце дай краткий итог.";
+          "пользователь подтверждает сам. " +
+          "Чтобы действовать по экрану: сначала see_screen (посмотри, что сейчас на экране), при " +
+          "необходимости узнай screen_size, прикинь координаты нужного элемента в этих пикселях, " +
+          "кликни mouse_click(x,y) или напечатай текст, затем снова see_screen — убедись, что " +
+          "получилось, и при промахе поправься. В конце дай краткий итог.";
         const agentHistory: AgentMessage[] = [
           { role: "system", content: agentSystem },
           ...history.map(({ role, content }) => ({ role, content })),

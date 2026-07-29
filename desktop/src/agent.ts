@@ -139,6 +139,15 @@ export const TOOLS: ToolDef[] = [
   {
     type: "function",
     function: {
+      name: "screen_size",
+      description:
+        "Размер экрана в пикселях в виде 'ШИРИНАxВЫСОТА'. Узнай его перед кликами, чтобы правильно перевести то, что видишь на скриншоте, в экранные координаты для mouse_click.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "http_get",
       description: "Загрузить содержимое URL (текст/HTML/JSON). Для чтения веб-страниц и API.",
       parameters: {
@@ -372,6 +381,8 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
         // On the Anthropic provider this is intercepted and the image is fed to vision.
         // On the bridge (text tool results) we can only hand back the path for now.
         return `экран захвачен: ${await invoke<string>("screenshot")} (анализ зрением доступен на провайдере «Claude напрямую»)`;
+      case "screen_size":
+        return await invoke<string>("screen_size");
       case "http_get": {
         const res = await fetch(String(args.url ?? ""));
         const text = await res.text();

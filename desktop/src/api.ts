@@ -224,6 +224,22 @@ export async function listTasks(settings: BrainSettings, limit = 50): Promise<De
   }
 }
 
+export type DesktopNotification = { id: number; title: string; body: string; remind_at: string };
+
+/** Recently-due reminders from the brain, for native desktop notifications. */
+export async function fetchNotifications(settings: BrainSettings): Promise<DesktopNotification[]> {
+  try {
+    const res = await fetch(taskUrl(settings, "/desktop/notifications"), {
+      headers: taskHeaders(settings),
+    });
+    if (!res.ok) return [];
+    const j = await res.json();
+    return Array.isArray(j?.notifications) ? j.notifications : [];
+  } catch {
+    return [];
+  }
+}
+
 /** List models available for the current provider. */
 export async function fetchModels(settings: BrainSettings): Promise<string[]> {
   if (settings.provider === "anthropic") return ANTHROPIC_MODELS;
