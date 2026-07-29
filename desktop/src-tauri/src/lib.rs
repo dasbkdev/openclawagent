@@ -24,7 +24,9 @@ pub struct CommandResult {
 // the user (or later the agent, with confirmation) asks. PowerShell on Windows, bash elsewhere.
 // Force PowerShell + native exes to emit UTF-8 so Cyrillic (window titles, output) isn't
 // mangled by the console's OEM code page (cp866 on RU Windows) when we read it as UTF-8.
-#[cfg(target_os = "windows")]
+// Referenced only inside `if cfg!(windows)` branches, but those compile on every target, so
+// the const must exist everywhere (hence no target_os gate). Harmless dead const off-Windows.
+#[allow(dead_code)]
 const PS_UTF8: &str =
     "$OutputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; chcp 65001 > $null; ";
 
